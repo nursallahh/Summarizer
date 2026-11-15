@@ -79,6 +79,12 @@ namespace Summarizer.Core
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
             public static extern int smz_cancel_job(CoreContextHandle context, long jobId);
 
+            // paths is a NUL-terminated UTF-8 byte array (see CoreContext.ImportPaths); passing bytes
+            // avoids depending on the runtime's string marshalling for non-ASCII file names.
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+            public static extern int smz_import_paths(CoreContextHandle context, byte[] paths, int recursive,
+                                                      out long outJobId);
+
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
             public static extern IntPtr smz_version();
 

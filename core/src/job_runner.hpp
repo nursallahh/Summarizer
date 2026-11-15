@@ -29,6 +29,10 @@ public:
 
     void report_progress(std::int64_t done, std::int64_t total);
 
+    // Emits a job-specific event (a complete JSON object). Never dropped, so use it for results,
+    // not for high-frequency updates.
+    void emit(std::string event_json) { events_.push(std::move(event_json), /*droppable=*/false); }
+
     // Sleeps up to `duration`, waking early if the job is cancelled.
     // Returns false if the job was cancelled.
     bool sleep_for(std::chrono::milliseconds duration) const;

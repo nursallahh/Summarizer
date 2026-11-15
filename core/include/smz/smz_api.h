@@ -112,6 +112,25 @@ SMZ_API smz_status smz_start_demo_job(smz_context* ctx, int32_t total_steps, int
 /* Requests cancellation of a job. Returns SMZ_ERR_NOT_FOUND if it already finished or never existed. */
 SMZ_API smz_status smz_cancel_job(smz_context* ctx, int64_t job_id);
 
+/*
+ * Starts a job that inspects files: content hash (SHA-256), type detected from the content,
+ * size, slide count for presentations and capture time for photos. Files are only read,
+ * never changed, moved or copied.
+ *
+ * paths:     UTF-8 file or folder paths separated by '\n'.
+ * recursive: non-zero to include sub-folders of the given folders.
+ *
+ * For every file the job emits, in a stable order (sorted by path):
+ *   {"type":"file_imported","job":1,"path":"C:\\...\\a.jpg","name":"a.jpg",
+ *    "sha256":"<64 hex>","file_type":"jpeg","size":12345,"pages":-1,
+ *    "captured_at":"2026-10-14T10:32:05","error":""}
+ * file_type is one of: jpeg, png, heic, webp, pdf, pptx, docx, text, audio, unsupported.
+ * pages is the slide count for pptx and -1 when not known (PDF pages come with PDF support).
+ * captured_at is the photo's EXIF capture time (camera local time) or "".
+ * The job_finished message lists paths that could not be found, if any.
+ */
+SMZ_API smz_status smz_import_paths(smz_context* ctx, const char* paths, int32_t recursive, int64_t* out_job_id);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
