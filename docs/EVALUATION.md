@@ -33,16 +33,30 @@ Differential Equations | first and second order ODEs, Laplace transform
 .\build\windows-release\bin\Release\summarizer.exe classify "C:\Users\<you>\Desktop\dersnotlari"
 ```
 
-This scans the folder, asks Gemini about every file that has no suggestion yet, and writes:
+This scans the folder, suggests a course for every file that has none yet, and writes:
 
-- `dersnotlari-scan.csv`: the table, saved after every file, so nothing is lost if the run stops
+- `dersnotlari-scan.csv`: the table, saved after every request, so nothing is lost if the run stops
 - `dersnotlari-scan-review.html`: the review page
 
-Photos, PDFs, PowerPoint, Word and text files are supported. When the free per-minute limit is reached
-the command waits; when the daily limit is reached it stops, and the same command continues the next day.
+How it stays fast:
 
-Options: `--model <id>` (default `gemini-3.5-flash-lite`), `--rpm <n>` requests per minute (default 10),
-`--redo` to ask again for files that already have a suggestion.
+- Photos are rotated upright and scaled to 1600 px (about 300 KB) before sending.
+- Gemini gets up to 10 files per request, so 70 files take about 7 requests.
+- There is no fixed delay; the command only waits when Gemini asks it to.
+
+When the free daily quota is used up, there is no internet, or the key is rejected, the command
+continues with a **local model** on this computer through [Ollama](https://ollama.com/download):
+
+```powershell
+ollama pull qwen3-vl:8b
+```
+
+The local model needs about 6 GB of graphics memory and reads one file at a time. It cannot read PDFs
+yet; those keep an error and are sent to Gemini on the next run. The `model` column and the report show
+which model made each suggestion.
+
+Options: `--model <id>` (default `gemini-3.5-flash-lite`), `--local-model <name>` (default `qwen3-vl:8b`),
+`--only gemini|local`, `--rpm <n>` to cap requests per minute, `--redo` to ask again.
 
 ## 3. Review
 
@@ -58,7 +72,7 @@ Only confirmed or changed files get a course; anything you skip stays unreviewed
 .\build\windows-release\bin\Release\summarizer.exe report "C:\Users\<you>\Desktop\dersnotlari-scan.csv"
 ```
 
-Prints accuracy with a 95% range, by file type, by course and by the model's own confidence, how many
+Prints accuracy with a 95% range, by file type, by course, by model (cloud or local) and by the model's own confidence, how many
 files could be accepted automatically, and every wrong suggestion. Files the model could not classify
 count as wrong.
 

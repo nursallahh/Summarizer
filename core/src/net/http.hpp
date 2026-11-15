@@ -17,7 +17,7 @@ struct HttpResponse {
 };
 
 struct HttpRequest {
-    std::string url;         // https://host/path?query
+    std::string url;         // https://host/path?query, or http://127.0.0.1:port/path
     std::vector<std::pair<std::string, std::string>> headers;
     std::string body;
     int timeout_seconds = 120;
@@ -25,7 +25,8 @@ struct HttpRequest {
 
 using HttpTransport = std::function<HttpResponse(const HttpRequest&)>;
 
-// Sends a POST over HTTPS with the system's proxy settings and certificate store.
+// Sends a POST. HTTPS uses the system's proxy settings and certificate store; plain HTTP is
+// allowed only to this computer (127.0.0.1 / localhost), for local model servers.
 HttpResponse http_post(const HttpRequest& request);
 
 }  // namespace smz

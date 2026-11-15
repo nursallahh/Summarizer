@@ -9,12 +9,13 @@ add_library(smz_core_internal STATIC
     src/files/sha256.cpp
     src/files/office_text.cpp
     src/net/http.cpp
-    src/classify/gemini.cpp
+    src/files/image_prep.cpp
+    src/classify/classifier.cpp
 )
 target_include_directories(smz_core_internal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(smz_core_internal PUBLIC Threads::Threads)
 if(WIN32)
-    target_link_libraries(smz_core_internal PUBLIC winhttp)
+    target_link_libraries(smz_core_internal PUBLIC winhttp windowscodecs ole32 oleaut32)
 endif()
 set_target_properties(smz_core_internal PROPERTIES
     POSITION_INDEPENDENT_CODE ON

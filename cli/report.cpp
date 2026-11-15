@@ -87,6 +87,7 @@ int run_report(const std::vector<std::string>& args) {
     const int type_col = column("type");
     const int level_col = column("suggestion_level");
     const int name_col = column("file_name");
+    const int model_col = column("model");
     if (course_col < 0 || sug_col < 0) {
         std::fprintf(stderr, "Error: the table has no course or suggested_course column. Run classify first.\n");
         return 1;
@@ -99,6 +100,7 @@ int run_report(const std::vector<std::string>& args) {
     std::map<std::string, Tally> by_type;
     std::map<std::string, Tally> by_level;
     std::map<std::string, Tally> by_course;
+    std::map<std::string, Tally> by_model;
     std::map<std::pair<std::string, std::string>, int> mixups;
     std::vector<std::string> wrong;
     int files = 0;
@@ -127,6 +129,7 @@ int run_report(const std::vector<std::string>& args) {
         add(by_type[cell(rows[r], type_col)]);
         add(by_level[guess.empty() ? "(none)" : cell(rows[r], level_col)]);
         add(by_course[truth]);
+        add(by_model[guess.empty() ? "(none)" : cell(rows[r], model_col)]);
         if (!ok) {
             ++mixups[{truth, guess.empty() ? "(no suggestion)" : guess}];
             wrong.push_back(cell(rows[r], name_col) + ": " + (guess.empty() ? "(no suggestion)" : guess) + " -> " +
@@ -146,6 +149,10 @@ int run_report(const std::vector<std::string>& args) {
     }
     std::printf("\nBy file type:\n");
     for (const auto& [k, t] : by_type) {
+        print_line(k, t);
+    }
+    std::printf("\nBy model (cloud and local are measured separately):\n");
+    for (const auto& [k, t] : by_model) {
         print_line(k, t);
     }
     std::printf("\nBy the model's own confidence:\n");
