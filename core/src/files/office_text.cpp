@@ -453,12 +453,12 @@ std::optional<std::string> inflate_raw(std::string_view compressed, std::size_t 
         } else if (type == 1) {
             static const std::pair<Huffman, Huffman> fixed = [] {
                 std::uint8_t l[288];
-                std::fill(l, l + 144, 8);
-                std::fill(l + 144, l + 256, 9);
-                std::fill(l + 256, l + 280, 7);
-                std::fill(l + 280, l + 288, 8);
+                std::fill(l, l + 144, std::uint8_t{8});
+                std::fill(l + 144, l + 256, std::uint8_t{9});
+                std::fill(l + 256, l + 280, std::uint8_t{7});
+                std::fill(l + 280, l + 288, std::uint8_t{8});
                 std::uint8_t d[30];
-                std::fill(d, d + 30, 5);
+                std::fill(d, d + 30, std::uint8_t{5});
                 std::pair<Huffman, Huffman> t;
                 t.first.build(l, 288);
                 t.second.build(d, 30);
