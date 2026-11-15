@@ -372,8 +372,20 @@ const char* level_symbol(const std::string& level) {
 // lost if the run stops. Returns false if the run had to stop early.
 bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& options, const fs::path& out,
                    char sep) {
-    const char* key = std::getenv("GEMINI_API_KEY");
-    if (key == nullptr || *key == '\0') {
+    std::string key;
+#if defined(_WIN32)
+    char* value = nullptr;
+    std::size_t length = 0;
+    if (_dupenv_s(&value, &length, "GEMINI_API_KEY") == 0 && value != nullptr) {
+        key = value;
+    }
+    std::free(value);
+#else
+    if (const char* value = std::getenv("GEMINI_API_KEY")) {
+        key = value;
+    }
+#endif
+    if (key.empty()) {
         std::fprintf(stderr,
                      "Error: no Gemini API key. Create one at https://aistudio.google.com/apikey, then run\n"
                      "  setx GEMINI_API_KEY \"<your key>\"\n"
