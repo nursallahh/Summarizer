@@ -15,3 +15,9 @@ add_executable(smz_core_file_tests test_files.cpp)
 target_link_libraries(smz_core_file_tests PRIVATE smz_core smz_core_internal)
 add_test(NAME smz_core_files COMMAND smz_core_file_tests)
 set_tests_properties(smz_core_files PROPERTIES TIMEOUT 60)
+
+# Office text, DEFLATE and the Gemini classifier (fake transport, no network).
+add_executable(smz_core_classify_tests test_classify.cpp)
+target_link_libraries(smz_core_classify_tests PRIVATE smz_core_internal)
+add_test(NAME smz_core_classify COMMAND smz_core_classify_tests)
+set_tests_properties(smz_core_classify PROPERTIES TIMEOUT 60)

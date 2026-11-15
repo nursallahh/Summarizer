@@ -1,9 +1,12 @@
 add_executable(summarizer_cli
     main.cpp
     scan.cpp
+    report.cpp
+    review_page.cpp
     csv.cpp
 )
-target_link_libraries(summarizer_cli PRIVATE smz_core)
+# Phase 0 tools also use core internals directly (classification, file reading).
+target_link_libraries(summarizer_cli PRIVATE smz_core smz_core_internal)
 set_target_properties(summarizer_cli PROPERTIES OUTPUT_NAME summarizer)
 
 if(WIN32)

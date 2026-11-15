@@ -1,6 +1,6 @@
 #pragma once
 
-// Small JSON reader for the command-line tool: enough to read the core's event batches.
+// Small JSON reader: enough for the core's event batches and API responses.
 // Supports objects, arrays, strings (with \u escapes and surrogate pairs), numbers, booleans and null.
 
 #include <cctype>
@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace cli {
+namespace smz {
 
 struct JsonValue {
     enum class Type { Null, Bool, Number, String, Array, Object };
@@ -272,4 +272,4 @@ private:
     std::size_t pos_ = 0;
 };
 
-}  // namespace cli
+}  // namespace smz

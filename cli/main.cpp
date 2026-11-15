@@ -23,12 +23,14 @@ void print_help() {
         "Summarizer command-line tool\n"
         "\n"
         "Usage:\n"
-        "  summarizer scan <folder> [--out <file.csv>]   Build the label table for a folder of course files\n"
-        "  summarizer --version                         Show the core version\n"
-        "  summarizer --info                            Show build information as JSON\n"
-        "  summarizer --help                            Show this help\n"
+        "  summarizer scan <folder>       Build the table of course files in a folder\n"
+        "  summarizer classify <folder>   Same, plus a course suggestion for each file and a review page\n"
+        "  summarizer report <table.csv>  Accuracy of the suggestions against the reviewed courses\n"
+        "  summarizer --version           Show the core version\n"
+        "  summarizer --info              Show build information as JSON\n"
+        "  summarizer --help              Show this help\n"
         "\n"
-        "Run \"summarizer scan --help\" for details.\n");
+        "Run \"summarizer scan --help\" for details on scan and classify.\n");
 }
 
 int print_info() {
@@ -64,7 +66,13 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[1], "scan") == 0) {
         // argv is UTF-8 on Windows too: summarizer.manifest sets the process code page to UTF-8.
-        return cli::run_scan(std::vector<std::string>(argv + 2, argv + argc));
+        return cli::run_scan(std::vector<std::string>(argv + 2, argv + argc), false);
+    }
+    if (std::strcmp(argv[1], "classify") == 0) {
+        return cli::run_scan(std::vector<std::string>(argv + 2, argv + argc), true);
+    }
+    if (std::strcmp(argv[1], "report") == 0) {
+        return cli::run_report(std::vector<std::string>(argv + 2, argv + argc));
     }
 
     std::fprintf(stderr, "Unknown command: %s\n\n", argv[1]);
