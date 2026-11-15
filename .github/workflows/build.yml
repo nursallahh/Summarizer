@@ -1,0 +1,37 @@
+name: Derleme ve test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  veri-kontrol:
+    name: Veri koruma kontrolü
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Depodaki tüm dosyaları denetle
+        run: git ls-files -z | xargs -0 sh tools/veri-kontrol.sh
+
+  windows:
+    name: Windows derlemesi (core + cli)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: vcpkg yolunu ayarla
+        shell: pwsh
+        run: echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      - name: Yapılandır
+        run: cmake --preset windows-release -DDA_COPY_TO_UNITY=OFF
+
+      - name: Derle
+        run: cmake --build --preset windows-release
+
+      - name: Testler
+        run: ctest --preset windows-release
+
+      - name: Komut satırı aracını dene
+        run: .\build\windows-release\bin\Release\ders-arsivi.exe --info

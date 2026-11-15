@@ -26,11 +26,11 @@ Uygulama dosyalarınızı silmez veya üzerine yazmaz; her toplu işlem geri al�
 > **Not:** Gemini API'nin ücretsiz katmanında gönderilen içerik Google tarafından ürün geliştirmek için kullanılabilir. Hassas bilgi içeren dersler için uygulamadaki "yalnız yerel" seçeneğini kullanın.
 
 **Geliştirme için**
-- Visual Studio 2022 ("C++ ile masaüstü geliştirme" iş yükü)
+- Visual Studio 2022 veya daha yenisi ("C++ ile masaüstü geliştirme" iş yükü)
 - CMake 3.25 veya üstü
 - vcpkg
 - Unity (LTS sürümü)
 
 ## Lisans
 
-Bu proje MIT lisansıyla dağıtılmaktadır. Ayrıntılar için `LICENSE` dosyasına bakın.
+Bu proje Apache License 2.0 ile dağıtılmaktadır. Ayrıntılar için `LICENSE` dosyasına bakın.
