@@ -1,6 +1,8 @@
 #include "smz/smz_api.h"
 
 #include "event_queue.hpp"
+#include "files/file_inspector.hpp"
+#include "files/path_utf8.hpp"
 #include "job_runner.hpp"
 #include "json_writer.hpp"
 #include "smz_version.h"
@@ -10,8 +12,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <new>
+#include <set>
 #include <string>
+#include <system_error>
+#include <vector>
 
 // The opaque context handed to callers of the C API.
 // Member order matters: the job runner is destroyed (and its threads joined) before the
@@ -88,6 +94,83 @@ smz::JobResult run_demo_job(smz::JobContext& job, std::int64_t total_steps, std:
         }
     }
     return {smz::JobResult::Outcome::Succeeded, ""};
+}
+
+
+// Splits newline-separated UTF-8 paths, expands folders and returns a sorted, de-duplicated list.
+std::vector<std::filesystem::path> expand_paths(const std::string& newline_separated, bool recursive,
+                                                std::string& warnings) {
+    namespace fs = std::filesystem;
+    std::set<fs::path> files;
+    std::size_t start = 0;
+    while (start <= newline_separated.size()) {
+        std::size_t end = newline_separated.find('\n', start);
+        if (end == std::string::npos) {
+            end = newline_separated.size();
+        }
+        std::string line = newline_separated.substr(start, end - start);
+        start = end + 1;
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+            line.pop_back();
+        }
+        if (line.empty()) {
+            continue;
+        }
+
+        const fs::path path = smz::path_from_utf8(line);
+        std::error_code ec;
+        if (fs::is_directory(path, ec)) {
+            const auto options = fs::directory_options::skip_permission_denied;
+            if (recursive) {
+                for (fs::recursive_directory_iterator it(path, options, ec), last; !ec && it != last; it.increment(ec)) {
+                    if (it->is_regular_file(ec)) {
+                        files.insert(it->path());
+                    }
+                }
+            } else {
+                for (fs::directory_iterator it(path, options, ec), last; !ec && it != last; it.increment(ec)) {
+                    if (it->is_regular_file(ec)) {
+                        files.insert(it->path());
+                    }
+                }
+            }
+            if (ec) {
+                warnings += "could not fully read folder " + line + ": " + ec.message() + "; ";
+            }
+        } else if (fs::is_regular_file(path, ec)) {
+            files.insert(path);
+        } else {
+            warnings += "not found: " + line + "; ";
+        }
+    }
+    return {files.begin(), files.end()};
+}
+
+smz::JobResult run_import_job(smz::JobContext& job, const std::string& paths, bool recursive) {
+    std::string warnings;
+    const std::vector<std::filesystem::path> files = expand_paths(paths, recursive, warnings);
+    const auto total = static_cast<std::int64_t>(files.size());
+
+    for (std::int64_t i = 0; i < total; ++i) {
+        if (job.is_cancelled()) {
+            return {smz::JobResult::Outcome::Cancelled, ""};
+        }
+        const smz::FileInfo info = smz::inspect_file(files[static_cast<std::size_t>(i)]);
+        job.emit(smz::JsonObject()
+                     .add("type", "file_imported")
+                     .add("job", job.id())
+                     .add("path", info.path)
+                     .add("name", info.file_name)
+                     .add("sha256", info.sha256)
+                     .add("file_type", info.type)
+                     .add("size", info.size)
+                     .add("pages", std::int64_t{info.pages})
+                     .add("captured_at", info.captured_at)
+                     .add("error", info.error)
+                     .finish());
+        job.report_progress(i + 1, total);
+    }
+    return {smz::JobResult::Outcome::Succeeded, warnings};
 }
 
 }  // namespace
@@ -200,6 +283,21 @@ smz_status smz_cancel_job(smz_context* ctx, int64_t job_id) {
         return SMZ_ERR_INVALID_ARGUMENT;
     }
     return guarded([&] { return ctx->jobs.cancel(job_id) ? SMZ_OK : SMZ_ERR_NOT_FOUND; });
+}
+
+smz_status smz_import_paths(smz_context* ctx, const char* paths, int32_t recursive, int64_t* out_job_id) {
+    if (ctx == nullptr || paths == nullptr || out_job_id == nullptr) {
+        return SMZ_ERR_INVALID_ARGUMENT;
+    }
+    *out_job_id = 0;
+    return guarded([&] {
+        std::string copy(paths);  // the caller's buffer may be freed as soon as we return
+        const bool deep = recursive != 0;
+        *out_job_id = ctx->jobs.submit("import", [copy = std::move(copy), deep](smz::JobContext& job) {
+            return run_import_job(job, copy, deep);
+        });
+        return SMZ_OK;
+    });
 }
 
 }  // extern "C"

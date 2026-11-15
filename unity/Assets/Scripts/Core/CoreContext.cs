@@ -33,9 +33,20 @@ namespace Summarizer.Core
         public string outcome;  // job_finished: "succeeded", "cancelled", "failed"
         public string message;  // job_finished
 
+        // file_imported
+        public string path;
+        public string name;
+        public string sha256;
+        public string file_type;   // jpeg, png, heic, webp, pdf, pptx, docx, text, audio, unsupported
+        public long size;
+        public int pages = -1;     // slides for pptx; -1 when not known yet
+        public string captured_at; // photo capture time from EXIF, or empty
+        public string error;
+
         public bool IsStarted => type == "job_started";
         public bool IsProgress => type == "job_progress";
         public bool IsFinished => type == "job_finished";
+        public bool IsFileImported => type == "file_imported";
     }
 
     /// <summary>The result of one smz_poll_events call.</summary>
@@ -88,6 +99,20 @@ namespace Summarizer.Core
         {
             ThrowIfDisposed();
             int status = NativeCore.Native.smz_start_demo_job(_handle, totalSteps, stepsPerSecond, out long jobId);
+            NativeCore.ThrowIfFailed(status);
+            return jobId;
+        }
+
+        /// <summary>
+        /// Starts inspecting files and folders (read-only). Emits one file_imported event per file.
+        /// Returns the job id.
+        /// </summary>
+        public long ImportPaths(System.Collections.Generic.IEnumerable<string> paths, bool recursive)
+        {
+            ThrowIfDisposed();
+            string joined = string.Join("\n", paths);
+            byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(joined + "\0");
+            int status = NativeCore.Native.smz_import_paths(_handle, utf8, recursive ? 1 : 0, out long jobId);
             NativeCore.ThrowIfFailed(status);
             return jobId;
         }

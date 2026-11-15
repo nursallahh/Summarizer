@@ -1,10 +1,13 @@
 // summarizer: command-line tool that uses the core without Unity.
 // In phase 0, accuracy tests and batch jobs run through this tool.
 
+#include "scan.hpp"
 #include "smz/smz_api.h"
 
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -20,9 +23,12 @@ void print_help() {
         "Summarizer command-line tool\n"
         "\n"
         "Usage:\n"
-        "  summarizer --version   Show the core version\n"
-        "  summarizer --info      Show build information as JSON\n"
-        "  summarizer --help      Show this help\n");
+        "  summarizer scan <folder> [--out <file.csv>]   Build the label table for a folder of course files\n"
+        "  summarizer --version                         Show the core version\n"
+        "  summarizer --info                            Show build information as JSON\n"
+        "  summarizer --help                            Show this help\n"
+        "\n"
+        "Run \"summarizer scan --help\" for details.\n");
 }
 
 int print_info() {
@@ -55,6 +61,10 @@ int main(int argc, char** argv) {
     }
     if (std::strcmp(argv[1], "--info") == 0) {
         return print_info();
+    }
+    if (std::strcmp(argv[1], "scan") == 0) {
+        // argv is UTF-8 on Windows too: summarizer.manifest sets the process code page to UTF-8.
+        return cli::run_scan(std::vector<std::string>(argv + 2, argv + argc));
     }
 
     std::fprintf(stderr, "Unknown command: %s\n\n", argv[1]);
