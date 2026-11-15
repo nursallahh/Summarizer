@@ -1,6 +1,6 @@
 {
-  "name": "ders-arsivi",
+  "name": "summarizer",
   "version": "0.0.1",
-  "description": "Course Archive - C++ core",
+  "description": "Summarizer - C++ core",
   "dependencies": []
 }

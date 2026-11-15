@@ -34,4 +34,4 @@ jobs:
         run: ctest --preset windows-release
 
       - name: Run the command-line tool
-        run: .\build\windows-release\bin\Release\ders-arsivi.exe --info
+        run: .\build\windows-release\bin\Release\summarizer.exe --info

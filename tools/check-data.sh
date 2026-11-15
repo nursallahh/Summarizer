@@ -1,5 +1,5 @@
 #!/bin/sh
-# Course Archive — data protection check
+# Summarizer — data protection check
 #
 # Checks a list of files so that personal data, model files or API keys never enter the repository.
 # Runs in two places:
