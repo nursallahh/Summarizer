@@ -1,0 +1,145 @@
+# =====================================================================
+# Ders Arşivi — .gitignore
+# Kural: Kişisel dosyalar, etiketler, modeller ve anahtarlar ASLA depoya girmez.
+# Not: .gitignore tek başına yeterli değildir (git add -f bunu aşar);
+#      pre-commit kontrolü ikinci koruma katmanıdır.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# 1) KİŞİSEL VERİ VE TEST VERİSİ (en önemli bölüm)
+# Gerçek veri depo dışında durur: C:\DersArsivi-veri\
+# Yine de yanlışlıkla depo içine kopyalanırsa diye:
+# ---------------------------------------------------------------------
+/data/
+/veri/
+/eval/data/
+/eval/private/
+*.etiket.csv
+*etiketler*.csv
+*labels*.csv
+
+# Görseller, belgeler ve medya: varsayılan olarak hepsi engelli...
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.webp
+*.bmp
+*.tif
+*.tiff
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+*.mp3
+*.m4a
+*.wav
+*.ogg
+*.mp4
+*.mov
+
+# ...yalnız şu klasörlerde izin verilir:
+# - Unity arayüz görselleri (ikonlar, arka planlar)
+# - Belgelerdeki ekran görüntüleri (kişisel bilgi içermemeli!)
+# - Sentetik test dosyaları (gerçek ders materyali DEĞİL)
+!/unity/Assets/**/*.png
+!/unity/Assets/**/*.jpg
+!/docs/images/**
+!/core/tests/fixtures/**
+
+# ---------------------------------------------------------------------
+# 2) YAPAY ZEKÂ MODELLERİ VE DİL VERİLERİ (GB boyutunda, indirilir)
+# ---------------------------------------------------------------------
+/models/
+*.gguf
+*.onnx
+*.safetensors
+*.traineddata
+
+# ---------------------------------------------------------------------
+# 3) ANAHTARLAR VE GİZLİ BİLGİLER
+# API anahtarı Windows Kimlik Bilgileri Yöneticisi'nde tutulur, dosyada değil.
+# ---------------------------------------------------------------------
+.env
+.env.*
+*.key
+*.pem
+secrets.*
+*api_key*
+*apikey*
+
+# ---------------------------------------------------------------------
+# 4) YEREL VERİTABANI VE LOGLAR
+# ---------------------------------------------------------------------
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+/logs/
+
+# ---------------------------------------------------------------------
+# 5) C++ / CMAKE / VCPKG
+# ---------------------------------------------------------------------
+/build/
+/out/
+/cmake-build-*/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+/vcpkg_installed/
+compile_commands.json
+
+# ---------------------------------------------------------------------
+# 6) VISUAL STUDIO / IDE
+# ---------------------------------------------------------------------
+.vs/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.ipch
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ---------------------------------------------------------------------
+# 7) UNITY (proje unity/ klasöründe)
+# ---------------------------------------------------------------------
+/unity/[Ll]ibrary/
+/unity/[Tt]emp/
+/unity/[Oo]bj/
+/unity/[Bb]uild/
+/unity/[Bb]uilds/
+/unity/[Ll]ogs/
+/unity/[Uu]ser[Ss]ettings/
+/unity/[Mm]emoryCaptures/
+/unity/[Rr]ecordings/
+/unity/*.csproj
+/unity/*.sln
+/unity/*.slnx
+/unity/*.pidb
+/unity/*.booproj
+/unity/*.unityproj
+/unity/*.apk
+/unity/*.aab
+/unity/sysinfo.txt
+/unity/crashlytics-build.properties
+
+# Derleme sırasında kopyalanan çekirdek DLL'i depoya girmez
+# (.meta dosyası girer; Unity'nin içe aktarma ayarlarını o tutar).
+/unity/Assets/Plugins/x86_64/*.dll
+/unity/Assets/Plugins/x86_64/*.pdb
+
+# ---------------------------------------------------------------------
+# 8) İŞLETİM SİSTEMİ
+# ---------------------------------------------------------------------
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+.DS_Store
