@@ -1,14 +1,14 @@
 # =====================================================================
-# Ders Arşivi — .gitignore
-# Kural: Kişisel dosyalar, etiketler, modeller ve anahtarlar ASLA depoya girmez.
-# Not: .gitignore tek başına yeterli değildir (git add -f bunu aşar);
-#      pre-commit kontrolü ikinci koruma katmanıdır.
+# Course Archive — .gitignore
+# Rule: personal files, labels, models and keys NEVER enter the repository.
+# Note: .gitignore alone is not enough (git add -f bypasses it);
+#       the pre-commit check is the second layer of protection.
 # =====================================================================
 
 # ---------------------------------------------------------------------
-# 1) KİŞİSEL VERİ VE TEST VERİSİ (en önemli bölüm)
-# Gerçek veri depo dışında durur: C:\DersArsivi-veri\
-# Yine de yanlışlıkla depo içine kopyalanırsa diye:
+# 1) PERSONAL DATA AND TEST DATA (most important section)
+# Real data lives outside the repository: C:\DersArsivi-veri\
+# In case it is accidentally copied into the repo anyway:
 # ---------------------------------------------------------------------
 /data/
 /veri/
@@ -18,7 +18,7 @@
 *etiketler*.csv
 *labels*.csv
 
-# Görseller, belgeler ve medya: varsayılan olarak hepsi engelli...
+# Images, documents and media: all blocked by default...
 *.jpg
 *.jpeg
 *.png
@@ -39,17 +39,17 @@
 *.mp4
 *.mov
 
-# ...yalnız şu klasörlerde izin verilir:
-# - Unity arayüz görselleri (ikonlar, arka planlar)
-# - Belgelerdeki ekran görüntüleri (kişisel bilgi içermemeli!)
-# - Sentetik test dosyaları (gerçek ders materyali DEĞİL)
+# ...and only allowed in these folders:
+# - Unity UI images (icons, backgrounds)
+# - Screenshots in docs (must not contain personal data!)
+# - Synthetic test files (NOT real course material)
 !/unity/Assets/**/*.png
 !/unity/Assets/**/*.jpg
 !/docs/images/**
 !/core/tests/fixtures/**
 
 # ---------------------------------------------------------------------
-# 2) YAPAY ZEKÂ MODELLERİ VE DİL VERİLERİ (GB boyutunda, indirilir)
+# 2) AI MODELS AND LANGUAGE DATA (gigabytes, downloaded at run time)
 # ---------------------------------------------------------------------
 /models/
 *.gguf
@@ -58,8 +58,8 @@
 *.traineddata
 
 # ---------------------------------------------------------------------
-# 3) ANAHTARLAR VE GİZLİ BİLGİLER
-# API anahtarı Windows Kimlik Bilgileri Yöneticisi'nde tutulur, dosyada değil.
+# 3) KEYS AND SECRETS
+# The API key is stored in Windows Credential Manager, never in a file.
 # ---------------------------------------------------------------------
 .env
 .env.*
@@ -70,7 +70,7 @@ secrets.*
 *apikey*
 
 # ---------------------------------------------------------------------
-# 4) YEREL VERİTABANI VE LOGLAR
+# 4) LOCAL DATABASE AND LOGS
 # ---------------------------------------------------------------------
 *.db
 *.db-journal
@@ -109,7 +109,7 @@ compile_commands.json
 !.vscode/extensions.json
 
 # ---------------------------------------------------------------------
-# 7) UNITY (proje unity/ klasöründe)
+# 7) UNITY (project lives in unity/)
 # ---------------------------------------------------------------------
 /unity/[Ll]ibrary/
 /unity/[Tt]emp/
@@ -131,13 +131,13 @@ compile_commands.json
 /unity/sysinfo.txt
 /unity/crashlytics-build.properties
 
-# Derleme sırasında kopyalanan çekirdek DLL'i depoya girmez
-# (.meta dosyası girer; Unity'nin içe aktarma ayarlarını o tutar).
+# The core DLL copied in at build time is not committed
+# (its .meta file is; it holds Unity's import settings).
 /unity/Assets/Plugins/x86_64/*.dll
 /unity/Assets/Plugins/x86_64/*.pdb
 
 # ---------------------------------------------------------------------
-# 8) İŞLETİM SİSTEMİ
+# 8) OPERATING SYSTEM
 # ---------------------------------------------------------------------
 Thumbs.db
 desktop.ini

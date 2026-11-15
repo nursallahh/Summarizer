@@ -1,6 +1,6 @@
 #!/bin/sh
-# Commit'e eklenen dosyaları veri koruma kontrolünden geçirir.
-# Bir kez etkinleştirin:  git config core.hooksPath tools/hooks
+# Runs the data protection check on files being committed.
+# Enable once per clone:  git config core.hooksPath tools/hooks
 
 repo_root=$(git rev-parse --show-toplevel) || exit 1
 cd "$repo_root" || exit 1
@@ -8,6 +8,6 @@ cd "$repo_root" || exit 1
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 [ -z "$staged" ] && exit 0
 
-echo "Veri kontrolü çalışıyor..."
-# Dosya adlarında boşluk olabilir: satır satır aktar
-echo "$staged" | tr '\n' '\0' | xargs -0 sh tools/veri-kontrol.sh
+echo "Running data check..."
+# File names may contain spaces: pass them line by line
+echo "$staged" | tr '\n' '\0' | xargs -0 sh tools/check-data.sh

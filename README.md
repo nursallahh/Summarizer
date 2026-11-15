@@ -1,36 +1,38 @@
-# Ders Arşivi
+# Ders Arşivi (Course Archive)
 
-Dağınık ders dosyalarını düzenli ve çalışılabilir bir ders arşivine dönüştüren ücretsiz, açık kaynak bir Windows uygulaması.
+A free, open-source Windows app that turns scattered course files into an organized archive you can actually study from.
 
-## Amaç
+## Purpose
 
-Öğrencilerin ders materyalleri; tahta ve defter fotoğrafları, slaytlar, PDF'ler ve ekran görüntüleri telefon galerisine, WhatsApp'a ve İndirilenler klasörüne dağılmış durumda. Ders Arşivi bu dosyaları derslere göre düzenler, içerikte aramayı sağlar ve dosyalardan kaynağı gösterilen özet ve çalışma soruları üretir.
+Students' course materials — whiteboard and notebook photos, slides, PDFs and screenshots — end up scattered across the phone gallery, WhatsApp and the Downloads folder. Ders Arşivi sorts these files by course, lets you search their contents, and generates summaries and study questions that always show which file each piece of information came from.
 
-## Kullanım
+## Usage
 
-1. Derslerinizi ekleyin: elle girin ya da ders programınızın görselini veya PDF'ini yükleyip çıkarılan dersleri onaylayın.
-2. Düzenlemek istediğiniz dosyaları seçin ya da uygulama penceresine sürükleyin.
-3. Uygulama her dosya için bir ders önerir. Önerileri tek ekranda inceleyin, gerekirse düzeltin ve onaylayın. Emin olunamayan dosyalar "İnceleme gerekli" olarak ayrılır.
-4. Arşivinizde dosya adına değil içeriğe göre arayın.
-5. Bir ders, konu veya dosya seçip özet ve çalışma soruları üretin. Her bilginin hangi dosyadan geldiği gösterilir.
+1. Add your courses: type them in, or upload an image or PDF of your timetable and confirm the courses found in it.
+2. Select the files you want to organize, or drag them onto the app window.
+3. The app suggests a course for each file. Review the suggestions on a single screen, fix any mistakes and confirm. Files the app is not sure about are set aside as "Needs review".
+4. Search your archive by content, not just by file name.
+5. Pick a course, topic or set of files and generate summaries and study questions. Every statement links back to its source file.
 
-Uygulama dosyalarınızı silmez veya üzerine yazmaz; her toplu işlem geri alınabilir. Dosyalarınız bilgisayarınızda kalır.
+The app never deletes or overwrites your files, and every batch action can be undone. Your files stay on your computer.
 
-## Gereksinimler
+## Requirements
 
-**Kullanım için**
-- Windows 10 veya 11 (64 bit)
-- İsteğe bağlı: Gemini API anahtarı. Anahtar girilirse el yazısı okuma ve özet üretimi için bulut kullanılır; kota dolduğunda veya internet olmadığında uygulama bilgisayardaki yedek modelle devam eder.
-- İsteğe bağlı: NVIDIA ekran kartı (yedek modeli hızlandırır)
+**To use**
+- Windows 10 or 11 (64-bit)
+- Optional: a Gemini API key. With a key, the cloud is used for reading handwriting and generating summaries; when the quota runs low or there is no internet connection, the app continues with a local fallback model.
+- Optional: an NVIDIA graphics card (speeds up the local fallback model)
 
-> **Not:** Gemini API'nin ücretsiz katmanında gönderilen içerik Google tarafından ürün geliştirmek için kullanılabilir. Hassas bilgi içeren dersler için uygulamadaki "yalnız yerel" seçeneğini kullanın.
+> **Note:** On the Gemini API free tier, content you send may be used by Google to improve its products. Use the app's "local only" option for courses that contain sensitive information.
 
-**Geliştirme için**
-- Visual Studio 2022 veya daha yenisi ("C++ ile masaüstü geliştirme" iş yükü)
-- CMake 3.25 veya üstü
+**To develop**
+- Visual Studio 2022 or newer ("Desktop development with C++" workload)
+- CMake 3.25 or newer
 - vcpkg
-- Unity (LTS sürümü)
+- Unity (LTS release)
 
-## Lisans
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for build instructions.
 
-Bu proje Apache License 2.0 ile dağıtılmaktadır. Ayrıntılar için `LICENSE` dosyasına bakın.
+## License
+
+This project is licensed under the Apache License 2.0. See the `LICENSE` file for details.

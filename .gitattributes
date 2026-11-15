@@ -1,16 +1,16 @@
-# Satır sonları: Windows'ta çalışılsa da kabuk betikleri LF kalmalı (Git Bash CRLF ile bozulur)
+# Line endings: shell scripts must stay LF even on Windows (Git Bash breaks on CRLF)
 * text=auto
 *.sh text eol=lf
 tools/hooks/* text eol=lf
 
-# Kaynak kod
+# Source code
 *.cpp text
 *.h text
 *.cs text
 *.json text
 *.md text
 
-# Unity dosyaları
+# Unity files
 *.unity text eol=lf
 *.prefab text eol=lf
 *.asset text eol=lf
@@ -18,7 +18,7 @@ tools/hooks/* text eol=lf
 *.uss text
 *.uxml text
 
-# İkili dosyalar
+# Binary files
 *.png binary
 *.jpg binary
 *.dll binary
