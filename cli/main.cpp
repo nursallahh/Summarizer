@@ -1,5 +1,5 @@
-// ders-arsivi: Çekirdeği Unity olmadan kullanan komut satırı aracı.
-// Faz 0'da doğruluk testleri ve toplu işler bu araçla yapılır.
+// ders-arsivi: command-line tool that uses the core without Unity.
+// In phase 0, accuracy tests and batch jobs run through this tool.
 
 #include "da/da_api.h"
 
@@ -17,19 +17,19 @@ namespace {
 
 void print_help() {
     std::printf(
-        "Ders Arşivi komut satırı aracı\n"
+        "Course Archive command-line tool\n"
         "\n"
-        "Kullanım:\n"
-        "  ders-arsivi --version   Çekirdek sürümünü gösterir\n"
-        "  ders-arsivi --info      Derleme bilgisini JSON olarak gösterir\n"
-        "  ders-arsivi --help      Bu yardımı gösterir\n");
+        "Usage:\n"
+        "  ders-arsivi --version   Show the core version\n"
+        "  ders-arsivi --info      Show build information as JSON\n"
+        "  ders-arsivi --help      Show this help\n");
 }
 
 int print_info() {
     char* json = nullptr;
     const da_status status = da_build_info(&json);
     if (status != DA_OK) {
-        std::fprintf(stderr, "Hata: %s\n", da_status_message(status));
+        std::fprintf(stderr, "Error: %s\n", da_status_message(status));
         return 1;
     }
     std::printf("%s\n", json);
@@ -41,7 +41,7 @@ int print_info() {
 
 int main(int argc, char** argv) {
 #if defined(_WIN32)
-    // Türkçe karakterler Windows konsolunda doğru görünsün.
+    // Make UTF-8 output (e.g. Turkish file names) display correctly in the Windows console.
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
         return print_info();
     }
 
-    std::fprintf(stderr, "Bilinmeyen komut: %s\n\n", argv[1]);
+    std::fprintf(stderr, "Unknown command: %s\n\n", argv[1]);
     print_help();
     return 2;
 }

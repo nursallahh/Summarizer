@@ -1,19 +1,19 @@
 /*
- * Ders Arşivi — C++ çekirdeğin dışarıya açık C arayüzü (C ABI).
+ * Course Archive — public C interface (C ABI) of the C++ core.
  *
- * Bu başlık, çekirdek ile onu kullanan her şey arasındaki tek sözleşmedir:
- * Unity (C#, P/Invoke), komut satırı aracı ve testler yalnızca bu fonksiyonları çağırır.
+ * This header is the only contract between the core and everything that uses it:
+ * Unity (C#, P/Invoke), the command-line tool and the tests call only these functions.
  *
- * SÖZLEŞME KURALLARI
- * 1. Metinler: Tüm metinler UTF-8'dir (dosya yolları dahil).
- * 2. Hata: Bir iş yapan her fonksiyon da_status döner. DA_OK dışındaki her değer hatadır.
- * 3. Bellek sahipliği:
- *    - "const char*" dönen fonksiyonlar (ör. da_version) çekirdeğe ait sabit bir metin döner.
- *      Çağıran bunu SERBEST BIRAKMAZ.
- *    - "char** out_..." parametresiyle metin veren fonksiyonlar yeni bellek ayırır.
- *      Çağıran işi bitince bu metni da_free_string ile SERBEST BIRAKIR.
- * 4. Uyumluluk: Bu dosyada geriye dönük uyumsuz bir değişiklik yapılırsa DA_ABI_VERSION artırılır.
- *    Unity tarafı açılışta da_abi_version() değerini kendi beklediği değerle karşılaştırır.
+ * CONTRACT RULES
+ * 1. Text: all strings are UTF-8, including file paths.
+ * 2. Errors: every function that performs work returns da_status. Anything other than DA_OK is an error.
+ * 3. Memory ownership:
+ *    - Functions returning "const char*" (e.g. da_version) return a static string owned by the core.
+ *      The caller must NOT free it.
+ *    - Functions returning text through a "char** out_..." parameter allocate new memory.
+ *      The caller MUST free it with da_free_string when done.
+ * 4. Compatibility: any backward-incompatible change to this file increments DA_ABI_VERSION.
+ *    The Unity side compares da_abi_version() with the value it expects at startup.
  */
 #ifndef DA_API_H
 #define DA_API_H
@@ -34,33 +34,33 @@
 extern "C" {
 #endif
 
-/* C arayüzünün sürümü. Yalnızca uyumsuz değişikliklerde artar. */
+/* Version of the C interface. Incremented only on incompatible changes. */
 #define DA_ABI_VERSION 1
 
 typedef enum da_status {
     DA_OK = 0,
-    DA_ERR_INVALID_ARGUMENT = 1, /* Geçersiz parametre (ör. NULL işaretçi) */
-    DA_ERR_OUT_OF_MEMORY = 2,    /* Bellek ayrılamadı */
-    DA_ERR_INTERNAL = 3          /* Beklenmeyen iç hata */
+    DA_ERR_INVALID_ARGUMENT = 1, /* Invalid argument (e.g. NULL pointer) */
+    DA_ERR_OUT_OF_MEMORY = 2,    /* Memory allocation failed */
+    DA_ERR_INTERNAL = 3          /* Unexpected internal error */
 } da_status;
 
-/* Çekirdeğin sürümü, ör. "0.0.1". Çekirdeğe aittir; serbest bırakılmaz. */
+/* Core version, e.g. "0.0.1". Owned by the core; do not free. */
 DA_API const char* da_version(void);
 
-/* Çekirdeğin derlendiği C arayüzü sürümü (DA_ABI_VERSION). */
+/* The C interface version the core was built with (DA_ABI_VERSION). */
 DA_API int32_t da_abi_version(void);
 
-/* Hata kodunun Türkçe açıklaması. Çekirdeğe aittir; serbest bırakılmaz. */
+/* Human-readable description of a status code. Owned by the core; do not free. */
 DA_API const char* da_status_message(da_status status);
 
 /*
- * Derleme bilgisini JSON olarak verir:
+ * Returns build information as JSON:
  *   {"version":"0.0.1","abi":1,"compiler":"...","build_type":"..."}
- * *out_json yeni ayrılmış bir metindir; çağıran da_free_string ile serbest bırakır.
+ * *out_json is newly allocated; the caller frees it with da_free_string.
  */
 DA_API da_status da_build_info(char** out_json);
 
-/* Çekirdeğin ayırdığı bir metni serbest bırakır. NULL güvenlidir. */
+/* Frees a string allocated by the core. Safe to call with NULL. */
 DA_API void da_free_string(char* str);
 
 #ifdef __cplusplus

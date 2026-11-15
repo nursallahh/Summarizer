@@ -10,8 +10,8 @@
 
 namespace {
 
-// C++ std::string'i C tarafına verilebilir, malloc ile ayrılmış bir kopyaya çevirir.
-// Serbest bırakma da_free_string (free) ile yapılır; new/delete karıştırılmaz.
+// Copies a std::string into a malloc-allocated C string that can cross the C boundary.
+// It is released with da_free_string (free); new/delete are never mixed with it.
 char* copy_to_c_string(const std::string& value) {
     char* out = static_cast<char*>(std::malloc(value.size() + 1));
     if (out == nullptr) {
@@ -29,7 +29,7 @@ std::string compiler_name() {
 #elif defined(__GNUC__)
     return "GCC " __VERSION__;
 #else
-    return "bilinmiyor";
+    return "unknown";
 #endif
 }
 
@@ -48,15 +48,15 @@ int32_t da_abi_version(void) {
 const char* da_status_message(da_status status) {
     switch (status) {
         case DA_OK:
-            return "Başarılı";
+            return "Success";
         case DA_ERR_INVALID_ARGUMENT:
-            return "Geçersiz parametre";
+            return "Invalid argument";
         case DA_ERR_OUT_OF_MEMORY:
-            return "Bellek ayrılamadı";
+            return "Out of memory";
         case DA_ERR_INTERNAL:
-            return "Beklenmeyen iç hata";
+            return "Unexpected internal error";
     }
-    return "Bilinmeyen hata kodu";
+    return "Unknown status code";
 }
 
 da_status da_build_info(char** out_json) {
@@ -65,7 +65,7 @@ da_status da_build_info(char** out_json) {
     }
     *out_json = nullptr;
 
-    // C sınırından istisna (exception) sızmamalı: Unity bunu yakalayamaz ve çöker.
+    // Exceptions must never cross the C boundary: Unity cannot catch them and would crash.
     try {
         std::string json;
         json += "{\"version\":\"";
