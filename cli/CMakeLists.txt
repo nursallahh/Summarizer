@@ -1,0 +1,3 @@
+add_executable(ders_arsivi_cli main.cpp)
+target_link_libraries(ders_arsivi_cli PRIVATE da_core)
+set_target_properties(ders_arsivi_cli PROPERTIES OUTPUT_NAME ders-arsivi)

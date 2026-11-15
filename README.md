@@ -33,4 +33,4 @@ Uygulama dosyalarınızı silmez veya üzerine yazmaz; her toplu işlem geri al�
 
 ## Lisans
 
-Bu proje MIT lisansıyla dağıtılmaktadır. Ayrıntılar için `LICENSE` dosyasına bakın.
+Bu proje Apache License 2.0 ile dağıtılmaktadır. Ayrıntılar için `LICENSE` dosyasına bakın.
