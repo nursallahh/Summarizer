@@ -241,6 +241,43 @@ std::string lower_extension(const std::filesystem::path& path) {
     return ext;
 }
 
+
+// Apple devices sometimes save a small "bookmark" (binary property list) instead of the document
+// itself, e.g. when sharing an iCloud file. It often has the document's extension, so it looks like
+// a PDF but is not. Returns the most likely target path stored in it, percent-decoded, or "".
+std::string apple_link_target(std::string_view head) {
+    std::string_view best;
+    std::size_t start = 0;
+    for (std::size_t i = 0; i <= head.size(); ++i) {
+        const bool printable = i < head.size() && static_cast<unsigned char>(head[i]) >= 0x20 &&
+                               static_cast<unsigned char>(head[i]) < 0x7F;
+        if (!printable) {
+            const std::string_view run = head.substr(start, i - start);
+            if (run.size() > best.size() && run.find('/') != std::string_view::npos) {
+                best = run;
+            }
+            start = i + 1;
+        }
+    }
+    std::string decoded;
+    for (std::size_t i = 0; i < best.size(); ++i) {
+        if (best[i] == '%' && i + 2 < best.size() && std::isxdigit(static_cast<unsigned char>(best[i + 1])) &&
+            std::isxdigit(static_cast<unsigned char>(best[i + 2]))) {
+            decoded += static_cast<char>(std::stoi(std::string(best.substr(i + 1, 2)), nullptr, 16));
+            i += 2;
+        } else {
+            decoded += best[i];
+        }
+    }
+    if (!is_valid_utf8(decoded)) {
+        decoded = std::string(best);
+    }
+    if (decoded.size() > 160) {
+        decoded = "..." + decoded.substr(decoded.size() - 157);
+    }
+    return decoded;
+}
+
 }  // namespace
 
 std::string detect_type(std::string_view head, std::string_view extension_lower, bool zip_has_ppt, bool zip_has_word) {
@@ -365,6 +402,12 @@ FileInfo inspect_file(const std::filesystem::path& path) {
             zip = read_zip_directory(path, size);
         }
         info.type = detect_type(head, lower_extension(path), zip.has_ppt, zip.has_word);
+        if (starts_with(head, "bplist00")) {
+            const std::string target = apple_link_target(head);
+            info.error = "Apple link file, not the document itself" +
+                         (target.empty() ? std::string() : " (points to: " + target + ")") +
+                         ". Copy the real file from the iPhone, iPad, Mac or iCloud.";
+        }
         if (info.type == "pptx") {
             info.pages = zip.slides;
         }
