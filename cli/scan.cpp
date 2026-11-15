@@ -1,18 +1,25 @@
-// summarizer scan: builds the label table for the accuracy tests.
+// summarizer scan / classify: builds the label table for the accuracy tests.
 //
-// It reads a folder of course files (read-only), and writes a CSV with one row per distinct file
-// content. The person fills in the "course" column in Excel. Running scan again later keeps every
-// course and note already written, and only adds rows for new files.
+// scan      reads a folder of course files (read-only) and writes a CSV with one row per
+//           distinct file content.
+// classify  does the same, then asks the model for a course suggestion for each file that has
+//           none yet, and writes a review page where the person confirms or corrects them.
+//
+// Running either command again keeps everything already in the table and only adds what is new.
 
 #include "scan.hpp"
 
+#include "classify/gemini.hpp"
 #include "csv.hpp"
+#include "files/office_text.hpp"
 #include "json_reader.hpp"
+#include "review_page.hpp"
 #include "smz/smz_api.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -21,6 +28,9 @@
 #include <system_error>
 #include <thread>
 #include <vector>
+
+using smz::JsonReader;
+using smz::JsonValue;
 
 namespace fs = std::filesystem;
 
@@ -59,40 +69,48 @@ bool is_within(const fs::path& child, const fs::path& parent) {
     return !rel.empty() && *rel.begin() != "..";
 }
 
-struct Labels {
-    std::string course;
-    std::string notes;
-};
+std::string read_file(const fs::path& p) {
+    std::ifstream in(p, std::ios::binary);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
+
+// Columns computed from the file on every scan.
+const std::vector<std::string> kFileColumns = {"sha256", "file_name", "other_names", "type",
+                                               "size_kb", "pages", "captured_at"};
+// Columns kept from the previous table: the person's labels and the model's suggestions.
+const std::vector<std::string> kKeptColumns = {"course",          "notes", "suggested_course", "also_related",
+                                               "suggestion_level", "kind",  "topic",            "evidence",
+                                               "model",           "classify_error"};
 
 struct Row {
     std::string sha256;
+    std::string path;  // UTF-8, empty for rows whose file was not found
     std::string file_name;
     std::vector<std::string> other_names;
     std::string type;
     std::int64_t size = 0;
     std::int64_t pages = -1;
     std::string captured_at;
-    Labels labels;
+    std::map<std::string, std::string> kept;
     bool missing = false;
+
+    std::string get(const std::string& column) const {
+        const auto it = kept.find(column);
+        return it == kept.end() ? std::string() : it->second;
+    }
 };
 
-const std::vector<std::string> kHeader = {"sha256",  "file_name",   "other_names", "type",
-                                          "size_kb", "pages",       "captured_at", "course",
-                                          "notes"};
-
-std::map<std::string, Labels> read_existing_labels(const fs::path& file, std::map<std::string, Row>& previous) {
-    std::map<std::string, Labels> labels;
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
-        return labels;
+std::map<std::string, Row> read_existing_table(const fs::path& file) {
+    std::map<std::string, Row> previous;
+    if (!fs::exists(file)) {
+        return previous;
     }
-    std::stringstream buffer;
-    buffer << in.rdbuf();
-    const std::vector<CsvRow> rows = parse_csv(to_utf8_if_needed(buffer.str()));
+    const std::vector<CsvRow> rows = parse_csv(to_utf8_if_needed(read_file(file)));
     if (rows.empty()) {
-        return labels;
+        return previous;
     }
-
     auto column = [&](const std::string& name) -> int {
         for (std::size_t i = 0; i < rows[0].size(); ++i) {
             if (rows[0][i] == name) {
@@ -101,31 +119,30 @@ std::map<std::string, Labels> read_existing_labels(const fs::path& file, std::ma
         }
         return -1;
     };
+    auto cell = [](const CsvRow& row, int col) {
+        return col >= 0 && col < static_cast<int>(row.size()) ? row[static_cast<std::size_t>(col)] : std::string();
+    };
     const int sha_col = column("sha256");
-    const int course_col = column("course");
-    const int notes_col = column("notes");
-    const int name_col = column("file_name");
-    const int type_col = column("type");
     if (sha_col < 0) {
-        return labels;
+        return previous;
     }
-
-    auto cell = [](const CsvRow& row, int col) { return col >= 0 && col < static_cast<int>(row.size()) ? row[col] : std::string(); };
     for (std::size_t r = 1; r < rows.size(); ++r) {
-        const std::string sha = cell(rows[r], sha_col);
-        if (sha.size() != 64) {
+        Row row;
+        row.sha256 = cell(rows[r], sha_col);
+        if (row.sha256.size() != 64) {
             continue;
         }
-        Labels l{cell(rows[r], course_col), cell(rows[r], notes_col)};
-        labels[sha] = l;
-        Row row;
-        row.sha256 = sha;
-        row.file_name = cell(rows[r], name_col);
-        row.type = cell(rows[r], type_col);
-        row.labels = l;
-        previous[sha] = row;
+        row.file_name = cell(rows[r], column("file_name"));
+        row.type = cell(rows[r], column("type"));
+        for (const std::string& name : kKeptColumns) {
+            const std::string value = cell(rows[r], column(name));
+            if (!value.empty()) {
+                row.kept[name] = value;
+            }
+        }
+        previous[row.sha256] = row;
     }
-    return labels;
+    return previous;
 }
 
 // Runs the core's import job and collects one event per file.
@@ -136,7 +153,6 @@ bool import_folder(const std::string& folder_utf8, bool recursive, std::vector<J
         std::fprintf(stderr, "Error: could not start the core.\n");
         return false;
     }
-
     std::int64_t job = 0;
     const smz_status started = smz_import_paths(ctx, folder_utf8.c_str(), recursive ? 1 : 0, &job);
     if (started != SMZ_OK) {
@@ -144,7 +160,6 @@ bool import_folder(const std::string& folder_utf8, bool recursive, std::vector<J
         smz_destroy(ctx);
         return false;
     }
-
     bool finished = false;
     bool ok = false;
     while (!finished) {
@@ -182,32 +197,409 @@ bool import_folder(const std::string& folder_utf8, bool recursive, std::vector<J
     return ok;
 }
 
+std::vector<const Row*> ordered_rows(const std::map<std::string, Row>& rows) {
+    // Photos in capture order: consecutive photos usually belong to the same lecture.
+    // Then everything else by name.
+    std::vector<const Row*> ordered;
+    for (const auto& [sha, row] : rows) {
+        ordered.push_back(&row);
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const Row* a, const Row* b) {
+        if (a->captured_at.empty() != b->captured_at.empty()) {
+            return !a->captured_at.empty();
+        }
+        if (a->captured_at != b->captured_at) {
+            return a->captured_at < b->captured_at;
+        }
+        return a->file_name < b->file_name;
+    });
+    return ordered;
+}
+
+std::vector<std::string> table_header() {
+    std::vector<std::string> header = kFileColumns;
+    header.insert(header.end(), kKeptColumns.begin(), kKeptColumns.end());
+    return header;
+}
+
+std::vector<std::string> table_fields(const Row& row) {
+    std::string others;
+    for (const std::string& n : row.other_names) {
+        others += (others.empty() ? "" : " | ") + n;
+    }
+    std::vector<std::string> fields = {
+        row.sha256,
+        row.file_name,
+        others,
+        row.type,
+        row.missing ? "" : std::to_string((row.size + 1023) / 1024),
+        row.pages >= 0 ? std::to_string(row.pages) : "",
+        row.captured_at,
+    };
+    for (const std::string& name : kKeptColumns) {
+        std::string value = row.get(name);
+        if (name == "notes" && row.missing && value.find("[not found in last scan]") == std::string::npos) {
+            value = "[not found in last scan] " + value;
+        }
+        fields.push_back(value);
+    }
+    return fields;
+}
+
+// Writes to a temporary file, then replaces the table. Returns false if the table is locked.
+bool write_table(const fs::path& out, const std::map<std::string, Row>& rows, char sep) {
+    std::string csv = "\xEF\xBB\xBF";
+    const std::vector<std::string> header = table_header();
+    for (std::size_t i = 0; i < header.size(); ++i) {
+        csv += (i ? std::string(1, sep) : "") + header[i];
+    }
+    csv += "\r\n";
+    for (const Row* row : ordered_rows(rows)) {
+        const std::vector<std::string> fields = table_fields(*row);
+        for (std::size_t i = 0; i < fields.size(); ++i) {
+            csv += (i ? std::string(1, sep) : "") + csv_escape(fields[i], sep);
+        }
+        csv += "\r\n";
+    }
+    std::error_code ec;
+    fs::create_directories(out.parent_path(), ec);
+    const fs::path tmp = path_from_utf8(path_to_utf8(out) + ".tmp");
+    {
+        std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
+        file.write(csv.data(), static_cast<std::streamsize>(csv.size()));
+        if (!file) {
+            return false;
+        }
+    }
+    fs::rename(tmp, out, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return false;
+    }
+    return true;
+}
+
+// ---- classification ----
+
+struct ClassifyOptions {
+    bool enabled = false;
+    std::string model = "gemini-3.5-flash-lite";
+    std::string courses_file;
+    int requests_per_minute = 10;
+    bool redo = false;
+};
+
+std::vector<smz::Course> read_courses(const fs::path& file) {
+    std::vector<smz::Course> courses;
+    std::string text = to_utf8_if_needed(read_file(file));
+    if (text.rfind("\xEF\xBB\xBF", 0) == 0) {
+        text.erase(0, 3);
+    }
+    std::istringstream lines(text);
+    std::string line;
+    auto trim = [](std::string s) {
+        const auto b = s.find_first_not_of(" \t\r");
+        const auto e = s.find_last_not_of(" \t\r");
+        return b == std::string::npos ? std::string() : s.substr(b, e - b + 1);
+    };
+    while (std::getline(lines, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        smz::Course c;
+        const auto bar = line.find('|');
+        c.name = trim(line.substr(0, bar));
+        if (bar != std::string::npos) {
+            c.description = trim(line.substr(bar + 1));
+        }
+        if (!c.name.empty()) {
+            courses.push_back(c);
+        }
+    }
+    return courses;
+}
+
+// Returns an empty error on success.
+std::string prepare_input(const Row& row, smz::ClassifyInput& input) {
+    // Inline requests are limited to about 20 MB including base64 overhead.
+    constexpr std::int64_t kMaxInlineBytes = 14 * 1024 * 1024;
+    constexpr std::size_t kMaxTextChars = 40000;
+    input.file_name = row.file_name;
+    static const std::map<std::string, std::string> kMime = {
+        {"jpeg", "image/jpeg"}, {"png", "image/png"}, {"webp", "image/webp"},
+        {"heic", "image/heic"}, {"pdf", "application/pdf"}};
+    const fs::path path = path_from_utf8(row.path);
+    if (const auto it = kMime.find(row.type); it != kMime.end()) {
+        if (row.size > kMaxInlineBytes) {
+            return "file larger than 14 MB; large-file upload is not supported yet";
+        }
+        input.mime_type = it->second;
+        input.bytes = read_file(path);
+        return input.bytes.empty() ? "could not read the file" : "";
+    }
+    if (row.type == "pptx" || row.type == "docx") {
+        const smz::OfficeText office = smz::extract_office_text(path, kMaxTextChars);
+        if (!office.error.empty()) {
+            return "could not read the document: " + office.error;
+        }
+        bool has_text = false;
+        std::istringstream lines(office.text);
+        for (std::string line; std::getline(lines, line);) {
+            if (line.rfind("--- Slide ", 0) != 0 && line.find_first_not_of(" \t\r") != std::string::npos) {
+                has_text = true;
+                break;
+            }
+        }
+        if (!has_text) {
+            return "the document has no text (slides with only pictures are not supported yet)";
+        }
+        input.text = office.text;
+        return "";
+    }
+    if (row.type == "text") {
+        input.text = read_file(path).substr(0, kMaxTextChars);
+        return "";
+    }
+    return row.type + " files are not supported for classification yet";
+}
+
+const char* level_symbol(const std::string& level) {
+    return level == "high" ? "" : level == "medium" ? " (medium)" : " (low)";
+}
+
+// Classifies rows that have no suggestion yet. Saves the table after each file so that nothing is
+// lost if the run stops. Returns false if the run had to stop early.
+bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& options, const fs::path& out,
+                   char sep) {
+    const char* key = std::getenv("GEMINI_API_KEY");
+    if (key == nullptr || *key == '\0') {
+        std::fprintf(stderr,
+                     "Error: no Gemini API key. Create one at https://aistudio.google.com/apikey, then run\n"
+                     "  setx GEMINI_API_KEY \"<your key>\"\n"
+                     "and open a new terminal.\n");
+        return false;
+    }
+    const fs::path courses_path = options.courses_file.empty() ? out.parent_path() / "courses.txt"
+                                                               : path_from_utf8(options.courses_file);
+    const std::vector<smz::Course> courses = read_courses(courses_path);
+    if (courses.size() < 2) {
+        std::fprintf(stderr,
+                     "Error: %s must list at least two courses, one per line:\n"
+                     "  Course name | optional description (topics, terms, instructor)\n",
+                     path_to_utf8(courses_path).c_str());
+        return false;
+    }
+    std::printf("Courses (%zu) from %s\n", courses.size(), path_to_utf8(courses_path).c_str());
+
+    const smz::GeminiClassifier classifier(key, options.model, courses);
+
+    std::vector<Row*> todo;
+    for (const Row* r : ordered_rows(rows)) {
+        Row* row = &rows[r->sha256];
+        if (!row->missing && (options.redo || row->get("suggested_course").empty())) {
+            todo.push_back(row);
+        }
+    }
+    if (todo.empty()) {
+        std::printf("Every file already has a suggestion. Use --redo to ask again.\n");
+        return true;
+    }
+    std::printf("Asking %s about %zu files (about %d per minute)...\n", options.model.c_str(), todo.size(),
+                options.requests_per_minute);
+
+    const auto interval = std::chrono::milliseconds(60000 / std::max(1, options.requests_per_minute));
+    auto next_request = std::chrono::steady_clock::now();
+    long long tokens = 0;
+    int done = 0;
+    int failed = 0;
+    for (std::size_t i = 0; i < todo.size(); ++i) {
+        Row& row = *todo[i];
+        std::printf("[%zu/%zu] %s: ", i + 1, todo.size(), row.file_name.c_str());
+        std::fflush(stdout);
+
+        smz::ClassifyInput input;
+        const std::string unsupported = prepare_input(row, input);
+        if (!unsupported.empty()) {
+            row.kept["classify_error"] = unsupported;
+            std::printf("skipped, %s\n", unsupported.c_str());
+            ++failed;
+            write_table(out, rows, sep);
+            continue;
+        }
+
+        smz::ClassifyResult result;
+        for (int attempt = 0; attempt < 6; ++attempt) {
+            std::this_thread::sleep_until(next_request);
+            next_request = std::chrono::steady_clock::now() + interval;
+            result = classifier.classify(input);
+            if (result.error == smz::ApiError::Network && attempt >= 1) {
+                break;  // still offline after one retry: stop instead of waiting on every file
+            }
+            if (result.error == smz::ApiError::RateLimited || result.error == smz::ApiError::Server ||
+                result.error == smz::ApiError::Network) {
+                const int wait = result.retry_after_seconds > 0 ? result.retry_after_seconds : 15 * (attempt + 1);
+                std::printf("busy (%s), waiting %d s... ", result.message.c_str(), wait);
+                std::fflush(stdout);
+                next_request = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
+                continue;
+            }
+            break;
+        }
+
+        switch (result.error) {
+            case smz::ApiError::None: {
+                const smz::Suggestion& s = result.suggestion;
+                std::string also;
+                for (const std::string& o : s.other_courses) {
+                    also += (also.empty() ? "" : " | ") + o;
+                }
+                row.kept["suggested_course"] = s.course;
+                row.kept["also_related"] = also;
+                row.kept["suggestion_level"] = s.level;
+                row.kept["kind"] = s.kind;
+                row.kept["topic"] = s.topic;
+                row.kept["evidence"] = s.evidence;
+                row.kept["model"] = options.model;
+                row.kept.erase("classify_error");
+                tokens += s.tokens;
+                ++done;
+                std::printf("%s%s\n", s.course.c_str(), level_symbol(s.level));
+                break;
+            }
+            case smz::ApiError::DailyQuota:
+                std::printf("\n");
+                std::fprintf(stderr,
+                             "The free daily quota is used up (%s).\n"
+                             "Everything done so far is saved. Run the same command tomorrow to continue.\n",
+                             result.message.c_str());
+                write_table(out, rows, sep);
+                return false;
+            case smz::ApiError::Network:
+                std::printf("\n");
+                std::fprintf(stderr,
+                             "No connection to Gemini (%s).\n"
+                             "Everything done so far is saved. Run the same command again when you are online.\n",
+                             result.message.c_str());
+                write_table(out, rows, sep);
+                return false;
+            case smz::ApiError::BadKey:
+                std::printf("\n");
+                std::fprintf(stderr, "The API key was rejected (%s). Check GEMINI_API_KEY.\n", result.message.c_str());
+                return false;
+            case smz::ApiError::ModelNotFound:
+                std::printf("\n");
+                std::fprintf(stderr,
+                             "The model \"%s\" is not available (%s).\n"
+                             "Try another one with --model, for example --model gemini-2.5-flash-lite\n",
+                             options.model.c_str(), result.message.c_str());
+                return false;
+            default:
+                row.kept["classify_error"] = result.message;
+                ++failed;
+                std::printf("failed, %s\n", result.message.c_str());
+                break;
+        }
+        if (!write_table(out, rows, sep)) {
+            std::fprintf(stderr, "Error: could not save the table. Is it open in Excel? Close it and run again.\n");
+            return false;
+        }
+    }
+    std::printf("\nSuggestions: %d new, %d could not be classified (see classify_error). Tokens used: %lld\n", done,
+                failed, tokens);
+    return true;
+}
+
+void write_review(const fs::path& out, const std::map<std::string, Row>& rows, char sep) {
+    std::vector<std::string> courses;
+    {
+        // The courses the person can choose from: the course list plus any course already used.
+        const fs::path courses_path = out.parent_path() / "courses.txt";
+        for (const smz::Course& c : read_courses(courses_path)) {
+            courses.push_back(c.name);
+        }
+        for (const auto& [sha, row] : rows) {
+            for (const std::string& name : {row.get("course"), row.get("suggested_course")}) {
+                if (!name.empty() && name[0] != '(' &&
+                    std::find(courses.begin(), courses.end(), name) == courses.end()) {
+                    courses.push_back(name);
+                }
+            }
+        }
+    }
+    ReviewData data;
+    data.title = path_to_utf8(out.stem());
+    data.table_file_name = path_to_utf8(out.filename());
+    data.separator = sep;
+    data.header = table_header();
+    data.courses = courses;
+    data.special = {std::string(smz::kCourseNotInList), std::string(smz::kNotCourseMaterial),
+                    std::string(smz::kUnreadable)};
+    for (const Row* row : ordered_rows(rows)) {
+        ReviewRow r;
+        r.fields = table_fields(*row);
+        r.path = row->path;
+        data.rows.push_back(std::move(r));
+    }
+    const fs::path page = path_from_utf8(path_to_utf8(out.parent_path() / out.stem()) + "-review.html");
+    std::ofstream file(page, std::ios::binary | std::ios::trunc);
+    const std::string html = build_review_page(data);
+    file.write(html.data(), static_cast<std::streamsize>(html.size()));
+    if (file) {
+        std::printf("Review page: %s\n", path_to_utf8(page).c_str());
+    }
+}
+
 }  // namespace
 
 void print_scan_help() {
     std::printf(
         "summarizer scan <folder> [--out <file.csv>] [--no-recursive]\n"
+        "summarizer classify <folder> [--out <file.csv>] [--courses <courses.txt>] [--model <id>]\n"
+        "                    [--rpm <requests per minute>] [--redo] [--no-recursive]\n"
         "\n"
-        "  Reads every file in <folder> (read-only) and writes a CSV label table with one row\n"
-        "  per distinct file content. Fill in the \"course\" column in Excel.\n"
-        "  Running scan again keeps the courses and notes you already wrote.\n"
+        "  scan reads every file in <folder> (read-only) and writes a CSV table with one row\n"
+        "  per distinct file content.\n"
+        "\n"
+        "  classify does the same, then asks Gemini for a course suggestion for each file that\n"
+        "  has none yet, and writes <table>-review.html next to the table. Open it in a browser,\n"
+        "  correct the wrong suggestions, and save the reviewed table over the old one.\n"
+        "  Needs the GEMINI_API_KEY environment variable and a courses.txt next to the table:\n"
+        "  one course per line, \"Course name | optional description\".\n"
+        "\n"
+        "  Running either command again keeps courses, notes and suggestions already in the table.\n"
         "\n"
         "  --out <file.csv>   Where to write the table.\n"
         "                     Default: next to the folder, named <folder>-scan.csv\n"
+        "  --courses <file>   Course list. Default: courses.txt next to the table.\n"
+        "  --model <id>       Gemini model. Default: gemini-3.5-flash-lite\n"
+        "  --rpm <n>          Requests per minute (default 10; the free tier allows only a few).\n"
+        "  --redo             Ask again for files that already have a suggestion.\n"
         "  --no-recursive     Do not include sub-folders.\n"
         "\n"
-        "  The table must be saved outside any git repository; scan refuses otherwise.\n");
+        "  The table must be saved outside any git repository; the command refuses otherwise.\n");
 }
 
-int run_scan(const std::vector<std::string>& args) {
+int run_scan(const std::vector<std::string>& args, bool classify) {
     std::string folder_arg;
     std::string out_arg;
     bool recursive = true;
+    ClassifyOptions options;
+    options.enabled = classify;
     for (std::size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--out" && i + 1 < args.size()) {
+        const bool has_value = i + 1 < args.size();
+        if (args[i] == "--out" && has_value) {
             out_arg = args[++i];
         } else if (args[i] == "--no-recursive") {
             recursive = false;
+        } else if (classify && args[i] == "--courses" && has_value) {
+            options.courses_file = args[++i];
+        } else if (classify && args[i] == "--model" && has_value) {
+            options.model = args[++i];
+        } else if (classify && args[i] == "--rpm" && has_value) {
+            options.requests_per_minute = std::max(1, std::atoi(args[++i].c_str()));
+        } else if (classify && args[i] == "--redo") {
+            options.redo = true;
         } else if (args[i] == "--help" || args[i] == "-h") {
             print_scan_help();
             return 0;
@@ -231,7 +623,7 @@ int run_scan(const std::vector<std::string>& args) {
         return 1;
     }
     folder = folder.lexically_normal();
-    if (folder.has_filename() == false) {
+    if (!folder.has_filename()) {
         folder = folder.parent_path();  // "C:\x\" -> "C:\x"
     }
 
@@ -251,10 +643,9 @@ int run_scan(const std::vector<std::string>& args) {
         return 1;
     }
 
-    std::map<std::string, Row> previous;
-    const std::map<std::string, Labels> labels = read_existing_labels(out, previous);
-    if (!labels.empty()) {
-        std::printf("Keeping labels from the existing table (%zu rows).\n", labels.size());
+    std::map<std::string, Row> previous = read_existing_table(out);
+    if (!previous.empty()) {
+        std::printf("Keeping labels and suggestions from the existing table (%zu rows).\n", previous.size());
     }
 
     std::printf("Scanning %s\n", path_to_utf8(folder).c_str());
@@ -265,29 +656,33 @@ int run_scan(const std::vector<std::string>& args) {
         return 1;
     }
 
-    // One row per distinct content. Files arrive sorted by path, so the first name is stable.
+    // One row per distinct content. Files arrive sorted by path.
     std::map<std::string, Row> rows;
     std::map<std::string, int> by_type;
     std::vector<std::string> skipped;
+    std::size_t imported = 0;
     for (const JsonValue& f : files) {
         const std::string type = f.string_or("file_type");
         const std::string sha = f.string_or("sha256");
-        if (type == "unsupported" || !f.string_or("error").empty() || sha.size() != 64) {
-            skipped.push_back(f.string_or("name") + (f.string_or("error").empty() ? "" : " (" + f.string_or("error") + ")"));
+        const std::string error = f.string_or("error");
+        if (type == "unsupported" || !error.empty() || sha.size() != 64) {
+            skipped.push_back(f.string_or("name") + (error.empty() ? "" : ": " + error));
             continue;
         }
+        ++imported;
         auto [it, inserted] = rows.try_emplace(sha);
         Row& row = it->second;
         if (inserted) {
             row.sha256 = sha;
+            row.path = f.string_or("path");
             row.file_name = f.string_or("name");
             row.type = type;
             row.size = f.int_or("size");
             row.pages = f.int_or("pages", -1);
             row.captured_at = f.string_or("captured_at");
-            const auto known = labels.find(sha);
-            if (known != labels.end()) {
-                row.labels = known->second;
+            const auto known = previous.find(sha);
+            if (known != previous.end()) {
+                row.kept = known->second.kept;
             }
             ++by_type[type];
         } else {
@@ -295,109 +690,47 @@ int run_scan(const std::vector<std::string>& args) {
             std::string name = f.string_or("name");
             if (name.size() < row.file_name.size()) {
                 std::swap(name, row.file_name);
+                row.path = f.string_or("path");
             }
             row.other_names.push_back(std::move(name));
         }
     }
+    const std::size_t distinct = rows.size();
 
     // Keep labelled rows whose file is gone, so no work is lost.
     int missing = 0;
     for (auto& [sha, row] : previous) {
-        if (rows.count(sha) == 0 && (!row.labels.course.empty() || !row.labels.notes.empty())) {
+        if (rows.count(sha) == 0 && (!row.get("course").empty() || !row.get("notes").empty())) {
             row.missing = true;
             rows[sha] = row;
             ++missing;
         }
     }
 
-    // Photos in capture order: consecutive photos usually belong to the same lecture,
-    // which makes labelling faster. Then everything else by name.
-    std::vector<const Row*> ordered;
-    for (const auto& [sha, row] : rows) {
-        ordered.push_back(&row);
-    }
-    std::sort(ordered.begin(), ordered.end(), [](const Row* a, const Row* b) {
-        if (a->captured_at.empty() != b->captured_at.empty()) {
-            return !a->captured_at.empty();
-        }
-        if (a->captured_at != b->captured_at) {
-            return a->captured_at < b->captured_at;
-        }
-        return a->file_name < b->file_name;
-    });
-
     const char sep = preferred_csv_separator();
-    std::string csv = "\xEF\xBB\xBF";
-    for (std::size_t i = 0; i < kHeader.size(); ++i) {
-        csv += (i ? std::string(1, sep) : "") + kHeader[i];
-    }
-    csv += "\r\n";
-    int unlabelled = 0;
-    for (const Row* row : ordered) {
-        std::string others;
-        for (const std::string& n : row->other_names) {
-            others += (others.empty() ? "" : " | ") + n;
-        }
-        std::string notes = row->labels.notes;
-        if (row->missing && notes.find("[not found in last scan]") == std::string::npos) {
-            notes = "[not found in last scan] " + notes;
-        }
-        const std::vector<std::string> fields = {
-            row->sha256,
-            row->file_name,
-            others,
-            row->type,
-            row->missing ? "" : std::to_string((row->size + 1023) / 1024),
-            row->pages >= 0 ? std::to_string(row->pages) : "",
-            row->captured_at,
-            row->labels.course,
-            notes,
-        };
-        for (std::size_t i = 0; i < fields.size(); ++i) {
-            csv += (i ? std::string(1, sep) : "") + csv_escape(fields[i], sep);
-        }
-        csv += "\r\n";
-        unlabelled += row->labels.course.empty() && !row->missing ? 1 : 0;
-    }
-
-    // Write to a temporary file first, keep a backup of the old table, then replace it.
-    fs::create_directories(out.parent_path(), ec);
-    const fs::path tmp = path_from_utf8(path_to_utf8(out) + ".tmp");
-    {
-        std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
-        file.write(csv.data(), static_cast<std::streamsize>(csv.size()));
-        if (!file) {
-            std::fprintf(stderr, "Error: could not write %s\n", path_to_utf8(tmp).c_str());
-            return 1;
-        }
-    }
     if (fs::exists(out, ec)) {
         fs::copy_file(out, path_from_utf8(path_to_utf8(out) + ".bak"), fs::copy_options::overwrite_existing, ec);
     }
-    fs::rename(tmp, out, ec);
-    if (ec) {
-        fs::remove(tmp, ec);
-        std::fprintf(stderr, "Error: could not replace %s. Is it open in Excel? Close it and run scan again.\n",
+    if (!write_table(out, rows, sep)) {
+        std::fprintf(stderr, "Error: could not write %s. Is it open in Excel? Close it and run again.\n",
                      path_to_utf8(out).c_str());
         return 1;
     }
 
-    std::printf("\nWrote %s\n", path_to_utf8(out).c_str());
-    std::printf("  %zu distinct files", rows.size() - static_cast<std::size_t>(missing));
+    std::printf("Wrote %s\n", path_to_utf8(out).c_str());
+    std::printf("  %zu distinct files", distinct);
     for (const auto& [type, count] : by_type) {
         std::printf(", %d %s", count, type.c_str());
     }
     std::printf("\n");
-    const std::size_t duplicates = files.size() - skipped.size() - (rows.size() - static_cast<std::size_t>(missing));
-    if (duplicates > 0) {
-        std::printf("  %zu duplicate copies merged into one row (see other_names)\n", duplicates);
+    if (imported > distinct) {
+        std::printf("  %zu duplicate copies merged into one row (see other_names)\n", imported - distinct);
     }
-    std::printf("  %d rows still need a course\n", unlabelled);
     if (missing > 0) {
         std::printf("  %d labelled files were not found this time; their rows were kept\n", missing);
     }
     if (!skipped.empty()) {
-        std::printf("  %zu files skipped (unsupported type or unreadable):\n", skipped.size());
+        std::printf("  %zu files skipped:\n", skipped.size());
         for (const std::string& s : skipped) {
             std::printf("    %s\n", s.c_str());
         }
@@ -405,7 +738,14 @@ int run_scan(const std::vector<std::string>& args) {
     if (!finish_message.empty()) {
         std::printf("  Note: %s\n", finish_message.c_str());
     }
-    return 0;
+
+    if (!options.enabled) {
+        return 0;
+    }
+    std::printf("\n");
+    const bool completed = classify_rows(rows, options, out, sep);
+    write_review(out, rows, sep);
+    return completed ? 0 : 1;
 }
 
 }  // namespace cli

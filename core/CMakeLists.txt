@@ -7,9 +7,15 @@ add_library(smz_core_internal STATIC
     src/job_runner.cpp
     src/files/file_inspector.cpp
     src/files/sha256.cpp
+    src/files/office_text.cpp
+    src/net/http.cpp
+    src/classify/gemini.cpp
 )
 target_include_directories(smz_core_internal PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(smz_core_internal PUBLIC Threads::Threads)
+if(WIN32)
+    target_link_libraries(smz_core_internal PUBLIC winhttp)
+endif()
 set_target_properties(smz_core_internal PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden
