@@ -1,6 +1,7 @@
 # C++ core library: built as smz_core.dll on Windows.
 add_library(smz_core SHARED
     src/smz_api.cpp
+    src/job_runner.cpp
 )
 
 configure_file(src/smz_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/smz_version.h @ONLY)
@@ -9,6 +10,9 @@ target_include_directories(smz_core
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
+
+find_package(Threads REQUIRED)
+target_link_libraries(smz_core PRIVATE Threads::Threads)
 
 # Functions are exported (dllexport) while building the DLL and imported (dllimport) by users.
 target_compile_definitions(smz_core PRIVATE SMZ_CORE_BUILDING)

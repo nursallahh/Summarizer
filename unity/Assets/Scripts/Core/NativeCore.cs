@@ -56,10 +56,29 @@ namespace Summarizer.Core
         public const int ExpectedAbiVersion = 1;
 
         private const string Library = "smz_core";
-        private const int StatusOk = 0;
+        internal const int StatusOk = 0;
+        internal const int StatusNotFound = 4;
 
-        private static class Native
+        // Raw entry points. Only this assembly uses them; everything else goes through
+        // NativeCore and CoreContext.
+        internal static class Native
         {
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+            public static extern int smz_create(out CoreContextHandle outContext);
+
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+            public static extern void smz_destroy(IntPtr context);
+
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+            public static extern int smz_poll_events(CoreContextHandle context, int maxEvents, out IntPtr outJson);
+
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+            public static extern int smz_start_demo_job(CoreContextHandle context, int totalSteps, int stepsPerSecond,
+                                                        out long outJobId);
+
+            [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
+            public static extern int smz_cancel_job(CoreContextHandle context, long jobId);
+
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
             public static extern IntPtr smz_version();
 
@@ -89,18 +108,29 @@ namespace Summarizer.Core
         public static string GetBuildInfoJson()
         {
             int status = Native.smz_build_info(out IntPtr json);
+            ThrowIfFailed(status);
+            return TakeString(json);
+        }
+
+        /// <summary>Throws <see cref="CoreException"/> if a core call did not return SMZ_OK.</summary>
+        internal static void ThrowIfFailed(int status)
+        {
             if (status != StatusOk)
             {
                 throw new CoreException(status, StatusMessage(status));
             }
+        }
 
+        /// <summary>Converts a core-allocated UTF-8 string and frees it. Safe with IntPtr.Zero.</summary>
+        internal static string TakeString(IntPtr text)
+        {
             try
             {
-                return Marshal.PtrToStringUTF8(json);
+                return text == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(text);
             }
             finally
             {
-                Native.smz_free_string(json);
+                Native.smz_free_string(text);
             }
         }
 
