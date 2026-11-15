@@ -1,6 +1,6 @@
-// Çekirdek C arayüzü testleri.
-// Bilinçli olarak test çerçevesi kullanılmıyor: Adım 1'de bağımlılık sıfır kalsın.
-// Test sayısı arttığında GoogleTest veya Catch2'ye geçilecek.
+// Tests for the core C interface.
+// No test framework on purpose: step 1 keeps zero dependencies.
+// We will switch to GoogleTest or Catch2 once the number of tests grows.
 
 #include "da/da_api.h"
 
@@ -14,9 +14,9 @@ int g_failures = 0;
 
 void check(bool condition, const char* description) {
     if (condition) {
-        std::printf("[GECTI] %s\n", description);
+        std::printf("[PASS] %s\n", description);
     } else {
-        std::printf("[KALDI] %s\n", description);
+        std::printf("[FAIL] %s\n", description);
         ++g_failures;
     }
 }
@@ -24,38 +24,38 @@ void check(bool condition, const char* description) {
 }  // namespace
 
 int main() {
-    // Sürüm boş olmamalı ve CMake'teki proje sürümüyle aynı olmalı.
+    // The version must be non-empty and match the CMake project version.
     const char* version = da_version();
-    check(version != nullptr && std::strlen(version) > 0, "da_version bos olmayan bir metin doner");
-    check(std::string(version) == DA_TEST_EXPECTED_VERSION, "da_version CMake proje surumuyle ayni");
+    check(version != nullptr && std::strlen(version) > 0, "da_version returns a non-empty string");
+    check(std::string(version) == DA_TEST_EXPECTED_VERSION, "da_version matches the CMake project version");
 
-    // Başlıktaki ABI sürümü ile derlenmiş DLL'inki aynı olmalı.
-    check(da_abi_version() == DA_ABI_VERSION, "da_abi_version basliktaki DA_ABI_VERSION ile ayni");
+    // The ABI version in the header must match the one compiled into the DLL.
+    check(da_abi_version() == DA_ABI_VERSION, "da_abi_version matches DA_ABI_VERSION in the header");
 
-    // Hata mesajları her kod için tanımlı olmalı.
-    check(std::strlen(da_status_message(DA_OK)) > 0, "DA_OK icin mesaj var");
-    check(std::strlen(da_status_message(DA_ERR_INTERNAL)) > 0, "DA_ERR_INTERNAL icin mesaj var");
-    check(std::strlen(da_status_message(static_cast<da_status>(999))) > 0, "Bilinmeyen kod icin mesaj var");
+    // Every status code must have a message.
+    check(std::strlen(da_status_message(DA_OK)) > 0, "DA_OK has a message");
+    check(std::strlen(da_status_message(DA_ERR_INTERNAL)) > 0, "DA_ERR_INTERNAL has a message");
+    check(std::strlen(da_status_message(static_cast<da_status>(999))) > 0, "Unknown status code has a message");
 
-    // NULL çıkış parametresi reddedilmeli, çökmemeli.
-    check(da_build_info(nullptr) == DA_ERR_INVALID_ARGUMENT, "da_build_info(NULL) gecersiz parametre doner");
+    // A NULL output parameter must be rejected, not crash.
+    check(da_build_info(nullptr) == DA_ERR_INVALID_ARGUMENT, "da_build_info(NULL) returns invalid argument");
 
-    // Derleme bilgisi geçerli bir metin döndürmeli ve serbest bırakılabilmeli.
+    // Build info must return valid text that can be freed.
     char* json = nullptr;
     const da_status status = da_build_info(&json);
-    check(status == DA_OK, "da_build_info basarili");
-    check(json != nullptr && json[0] == '{', "da_build_info JSON nesnesi doner");
-    check(json != nullptr && std::strstr(json, DA_TEST_EXPECTED_VERSION) != nullptr, "JSON surumu iceriyor");
+    check(status == DA_OK, "da_build_info succeeds");
+    check(json != nullptr && json[0] == '{', "da_build_info returns a JSON object");
+    check(json != nullptr && std::strstr(json, DA_TEST_EXPECTED_VERSION) != nullptr, "JSON contains the version");
     da_free_string(json);
 
-    // NULL serbest bırakma güvenli olmalı.
+    // Freeing NULL must be safe.
     da_free_string(nullptr);
-    check(true, "da_free_string(NULL) cokmez");
+    check(true, "da_free_string(NULL) does not crash");
 
     if (g_failures > 0) {
-        std::printf("\n%d test KALDI\n", g_failures);
+        std::printf("\n%d test(s) FAILED\n", g_failures);
         return 1;
     }
-    std::printf("\nTum testler gecti\n");
+    std::printf("\nAll tests passed\n");
     return 0;
 }

@@ -2,22 +2,22 @@ cmake_minimum_required(VERSION 3.25)
 
 project(DersArsivi
     VERSION 0.0.1
-    DESCRIPTION "Ders Arsivi - C++ cekirdek ve komut satiri araci"
+    DESCRIPTION "Course Archive - C++ core and command-line tool"
     LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Windows'ta DLL ve exe ayni klasore dussun (calistirirken DLL bulunsun).
+# On Windows, put the DLL and executables in the same folder so the DLL is found at run time.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-option(DA_BUILD_TESTS "Cekirdek testlerini derle" ON)
-option(DA_COPY_TO_UNITY "Derlenen DLL'i unity/Assets/Plugins/x86_64 altina kopyala" ON)
+option(DA_BUILD_TESTS "Build the core tests" ON)
+option(DA_COPY_TO_UNITY "Copy the built DLL into unity/Assets/Plugins/x86_64" ON)
 
 if(MSVC)
-    # UTF-8 kaynak dosyalari, sik uyarilar
+    # UTF-8 source files, strict warnings
     add_compile_options(/utf-8 /W4 /permissive-)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)

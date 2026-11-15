@@ -1,4 +1,4 @@
-# C++ çekirdek kütüphane: Windows'ta da_core.dll olarak derlenir.
+# C++ core library: built as da_core.dll on Windows.
 add_library(da_core SHARED
     src/da_api.cpp
 )
@@ -10,21 +10,21 @@ target_include_directories(da_core
     PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
-# DLL'i derlerken fonksiyonlar dışa aktarılır (dllexport), kullanırken içe alınır (dllimport).
+# Functions are exported (dllexport) while building the DLL and imported (dllimport) by users.
 target_compile_definitions(da_core PRIVATE DA_CORE_BUILDING)
 
-# Yalnızca da_api.h'de DA_API ile işaretlenen fonksiyonlar dışarı açılsın.
+# Only functions marked with DA_API in da_api.h are exported.
 set_target_properties(da_core PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
 
-# Derlenen DLL'i Unity projesine kopyala (unity/ klasörü varsa).
+# Copy the built DLL into the Unity project (if the unity/ folder exists).
 set(DA_UNITY_PLUGIN_DIR ${PROJECT_SOURCE_DIR}/unity/Assets/Plugins/x86_64)
 if(WIN32 AND DA_COPY_TO_UNITY AND EXISTS ${PROJECT_SOURCE_DIR}/unity/Assets)
     add_custom_command(TARGET da_core POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory ${DA_UNITY_PLUGIN_DIR}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:da_core> ${DA_UNITY_PLUGIN_DIR}
-        COMMENT "da_core.dll Unity projesine kopyalanıyor"
+        COMMENT "Copying da_core.dll into the Unity project"
     )
 endif()
