@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace CourseArchive.Core
+namespace Summarizer.Core
 {
     /// <summary>
     /// Result of loading the C++ core and checking that its C interface matches what Unity expects.
@@ -29,7 +29,7 @@ namespace CourseArchive.Core
         }
     }
 
-    /// <summary>Thrown when a core function returns a status other than DA_OK.</summary>
+    /// <summary>Thrown when a core function returns a status other than SMZ_OK.</summary>
     public sealed class CoreException : Exception
     {
         public int Status { get; }
@@ -41,54 +41,54 @@ namespace CourseArchive.Core
     }
 
     /// <summary>
-    /// Thin C# layer over the C interface in core/include/da/da_api.h.
+    /// Thin C# layer over the C interface in core/include/smz/smz_api.h.
     ///
-    /// Memory rules (see the contract at the top of da_api.h):
+    /// Memory rules (see the contract at the top of smz_api.h):
     /// - Functions that return "const char*" return a string owned by the core. They are declared
     ///   here as returning IntPtr on purpose: if they were declared as returning string, the .NET
     ///   marshaller would try to free the core's static memory and crash the editor.
     /// - Functions that hand out text through "char** out_..." allocate memory in the core.
-    ///   It is always released with da_free_string, in a finally block.
+    ///   It is always released with smz_free_string, in a finally block.
     /// </summary>
     public static class NativeCore
     {
-        /// <summary>Must match DA_ABI_VERSION in da_api.h. Bump both together.</summary>
+        /// <summary>Must match SMZ_ABI_VERSION in smz_api.h. Bump both together.</summary>
         public const int ExpectedAbiVersion = 1;
 
-        private const string Library = "da_core";
+        private const string Library = "smz_core";
         private const int StatusOk = 0;
 
         private static class Native
         {
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-            public static extern IntPtr da_version();
+            public static extern IntPtr smz_version();
 
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-            public static extern int da_abi_version();
+            public static extern int smz_abi_version();
 
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-            public static extern IntPtr da_status_message(int status);
+            public static extern IntPtr smz_status_message(int status);
 
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-            public static extern int da_build_info(out IntPtr outJson);
+            public static extern int smz_build_info(out IntPtr outJson);
 
             [DllImport(Library, CallingConvention = CallingConvention.Cdecl)]
-            public static extern void da_free_string(IntPtr str);
+            public static extern void smz_free_string(IntPtr str);
         }
 
         /// <summary>Core version, e.g. "0.0.1".</summary>
-        public static string Version => Marshal.PtrToStringUTF8(Native.da_version());
+        public static string Version => Marshal.PtrToStringUTF8(Native.smz_version());
 
         /// <summary>The C interface version the core was built with.</summary>
-        public static int AbiVersion => Native.da_abi_version();
+        public static int AbiVersion => Native.smz_abi_version();
 
         /// <summary>Human-readable message for a core status code.</summary>
-        public static string StatusMessage(int status) => Marshal.PtrToStringUTF8(Native.da_status_message(status));
+        public static string StatusMessage(int status) => Marshal.PtrToStringUTF8(Native.smz_status_message(status));
 
         /// <summary>Build information as a JSON string.</summary>
         public static string GetBuildInfoJson()
         {
-            int status = Native.da_build_info(out IntPtr json);
+            int status = Native.smz_build_info(out IntPtr json);
             if (status != StatusOk)
             {
                 throw new CoreException(status, StatusMessage(status));
@@ -100,7 +100,7 @@ namespace CourseArchive.Core
             }
             finally
             {
-                Native.da_free_string(json);
+                Native.smz_free_string(json);
             }
         }
 
@@ -127,13 +127,13 @@ namespace CourseArchive.Core
             catch (DllNotFoundException)
             {
                 return new CoreCheckResult(false, false, null, 0, null,
-                    "da_core.dll was not found. Build the core (see docs/DEVELOPMENT.md); " +
+                    "smz_core.dll was not found. Build the core (see docs/DEVELOPMENT.md); " +
                     "the build copies it into Assets/Plugins/x86_64. Then restart Unity.");
             }
             catch (EntryPointNotFoundException e)
             {
                 return new CoreCheckResult(false, false, null, 0, null,
-                    "da_core.dll is out of date (missing function: " + e.Message + "). " +
+                    "smz_core.dll is out of date (missing function: " + e.Message + "). " +
                     "Close Unity, rebuild the core, then reopen Unity.");
             }
             catch (CoreException e)

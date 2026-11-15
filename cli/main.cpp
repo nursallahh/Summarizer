@@ -1,7 +1,7 @@
-// ders-arsivi: command-line tool that uses the core without Unity.
+// summarizer: command-line tool that uses the core without Unity.
 // In phase 0, accuracy tests and batch jobs run through this tool.
 
-#include "da/da_api.h"
+#include "smz/smz_api.h"
 
 #include <cstdio>
 #include <cstring>
@@ -17,23 +17,23 @@ namespace {
 
 void print_help() {
     std::printf(
-        "Course Archive command-line tool\n"
+        "Summarizer command-line tool\n"
         "\n"
         "Usage:\n"
-        "  ders-arsivi --version   Show the core version\n"
-        "  ders-arsivi --info      Show build information as JSON\n"
-        "  ders-arsivi --help      Show this help\n");
+        "  summarizer --version   Show the core version\n"
+        "  summarizer --info      Show build information as JSON\n"
+        "  summarizer --help      Show this help\n");
 }
 
 int print_info() {
     char* json = nullptr;
-    const da_status status = da_build_info(&json);
-    if (status != DA_OK) {
-        std::fprintf(stderr, "Error: %s\n", da_status_message(status));
+    const smz_status status = smz_build_info(&json);
+    if (status != SMZ_OK) {
+        std::fprintf(stderr, "Error: %s\n", smz_status_message(status));
         return 1;
     }
     std::printf("%s\n", json);
-    da_free_string(json);
+    smz_free_string(json);
     return 0;
 }
 
@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (std::strcmp(argv[1], "--version") == 0 || std::strcmp(argv[1], "-v") == 0) {
-        std::printf("ders-arsivi %s\n", da_version());
+        std::printf("summarizer %s\n", smz_version());
         return 0;
     }
     if (std::strcmp(argv[1], "--info") == 0) {

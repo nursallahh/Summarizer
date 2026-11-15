@@ -1,5 +1,5 @@
 # =====================================================================
-# Course Archive — .gitignore
+# Summarizer — .gitignore
 # Rule: personal files, labels, models and keys NEVER enter the repository.
 # Note: .gitignore alone is not enough (git add -f bypasses it);
 #       the pre-commit check is the second layer of protection.
@@ -7,7 +7,7 @@
 
 # ---------------------------------------------------------------------
 # 1) PERSONAL DATA AND TEST DATA (most important section)
-# Real data lives outside the repository: C:\DersArsivi-veri\
+# Real data lives in a folder outside the repository.
 # In case it is accidentally copied into the repo anyway:
 # ---------------------------------------------------------------------
 /data/

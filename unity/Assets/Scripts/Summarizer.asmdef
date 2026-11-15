@@ -1,6 +1,6 @@
 {
-    "name": "CourseArchive",
-    "rootNamespace": "CourseArchive",
+    "name": "Summarizer",
+    "rootNamespace": "Summarizer",
     "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -1,7 +1,7 @@
-using CourseArchive.Core;
+using Summarizer.Core;
 using UnityEngine;
 
-namespace CourseArchive.Diagnostics
+namespace Summarizer.Diagnostics
 {
     /// <summary>
     /// TEMPORARY (phase 0, step 1): shows on screen whether the C++ core was loaded.
@@ -32,12 +32,12 @@ namespace CourseArchive.Diagnostics
                         $"Version: {_result.Version}\n" +
                         $"C interface (ABI): {_result.AbiVersion} (expected {NativeCore.ExpectedAbiVersion})\n\n" +
                         _result.BuildInfoJson;
-                Debug.Log($"[CourseArchive] Core {_result.Version} loaded. {_result.BuildInfoJson}");
+                Debug.Log($"[Summarizer] Core {_result.Version} loaded. {_result.BuildInfoJson}");
             }
             else
             {
                 _text = "C++ core could not be used\n\n" + _result.Error;
-                Debug.LogError("[CourseArchive] " + _result.Error);
+                Debug.LogError("[Summarizer] " + _result.Error);
             }
         }
 

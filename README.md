@@ -1,10 +1,10 @@
-# Ders Arşivi (Course Archive)
+# Summarizer
 
 A free, open-source Windows app that turns scattered course files into an organized archive you can actually study from.
 
 ## Purpose
 
-Students' course materials — whiteboard and notebook photos, slides, PDFs and screenshots — end up scattered across the phone gallery, WhatsApp and the Downloads folder. Ders Arşivi sorts these files by course, lets you search their contents, and generates summaries and study questions that always show which file each piece of information came from.
+Students' course materials — whiteboard and notebook photos, slides, PDFs and screenshots — end up scattered across the phone gallery, WhatsApp and the Downloads folder. Summarizer sorts these files by course, lets you search their contents, and generates summaries and study questions that always show which file each piece of information came from.
 
 ## Usage
 

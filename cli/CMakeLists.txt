@@ -1,3 +1,3 @@
-add_executable(ders_arsivi_cli main.cpp)
-target_link_libraries(ders_arsivi_cli PRIVATE da_core)
-set_target_properties(ders_arsivi_cli PROPERTIES OUTPUT_NAME ders-arsivi)
+add_executable(summarizer_cli main.cpp)
+target_link_libraries(summarizer_cli PRIVATE smz_core)
+set_target_properties(summarizer_cli PROPERTIES OUTPUT_NAME summarizer)

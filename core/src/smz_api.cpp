@@ -1,6 +1,6 @@
-#include "da/da_api.h"
+#include "smz/smz_api.h"
 
-#include "da_version.h"
+#include "smz_version.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -11,7 +11,7 @@
 namespace {
 
 // Copies a std::string into a malloc-allocated C string that can cross the C boundary.
-// It is released with da_free_string (free); new/delete are never mixed with it.
+// It is released with smz_free_string (free); new/delete are never mixed with it.
 char* copy_to_c_string(const std::string& value) {
     char* out = static_cast<char*>(std::malloc(value.size() + 1));
     if (out == nullptr) {
@@ -37,31 +37,31 @@ std::string compiler_name() {
 
 extern "C" {
 
-const char* da_version(void) {
-    return DA_VERSION_STRING;
+const char* smz_version(void) {
+    return SMZ_VERSION_STRING;
 }
 
-int32_t da_abi_version(void) {
-    return DA_ABI_VERSION;
+int32_t smz_abi_version(void) {
+    return SMZ_ABI_VERSION;
 }
 
-const char* da_status_message(da_status status) {
+const char* smz_status_message(smz_status status) {
     switch (status) {
-        case DA_OK:
+        case SMZ_OK:
             return "Success";
-        case DA_ERR_INVALID_ARGUMENT:
+        case SMZ_ERR_INVALID_ARGUMENT:
             return "Invalid argument";
-        case DA_ERR_OUT_OF_MEMORY:
+        case SMZ_ERR_OUT_OF_MEMORY:
             return "Out of memory";
-        case DA_ERR_INTERNAL:
+        case SMZ_ERR_INTERNAL:
             return "Unexpected internal error";
     }
     return "Unknown status code";
 }
 
-da_status da_build_info(char** out_json) {
+smz_status smz_build_info(char** out_json) {
     if (out_json == nullptr) {
-        return DA_ERR_INVALID_ARGUMENT;
+        return SMZ_ERR_INVALID_ARGUMENT;
     }
     *out_json = nullptr;
 
@@ -69,25 +69,25 @@ da_status da_build_info(char** out_json) {
     try {
         std::string json;
         json += "{\"version\":\"";
-        json += DA_VERSION_STRING;
+        json += SMZ_VERSION_STRING;
         json += "\",\"abi\":";
-        json += std::to_string(DA_ABI_VERSION);
+        json += std::to_string(SMZ_ABI_VERSION);
         json += ",\"compiler\":\"";
         json += compiler_name();
         json += "\",\"build_type\":\"";
-        json += DA_BUILD_TYPE;
+        json += SMZ_BUILD_TYPE;
         json += "\"}";
 
         *out_json = copy_to_c_string(json);
-        return *out_json != nullptr ? DA_OK : DA_ERR_OUT_OF_MEMORY;
+        return *out_json != nullptr ? SMZ_OK : SMZ_ERR_OUT_OF_MEMORY;
     } catch (const std::bad_alloc&) {
-        return DA_ERR_OUT_OF_MEMORY;
+        return SMZ_ERR_OUT_OF_MEMORY;
     } catch (...) {
-        return DA_ERR_INTERNAL;
+        return SMZ_ERR_INTERNAL;
     }
 }
 
-void da_free_string(char* str) {
+void smz_free_string(char* str) {
     std::free(str);
 }
 
