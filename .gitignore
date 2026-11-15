@@ -120,6 +120,8 @@ compile_commands.json
 /unity/[Uu]ser[Ss]ettings/
 /unity/[Mm]emoryCaptures/
 /unity/[Rr]ecordings/
+/unity/.vscode/
+/unity/.idea/
 /unity/*.csproj
 /unity/*.sln
 /unity/*.slnx

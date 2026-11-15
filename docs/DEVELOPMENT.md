@@ -57,6 +57,21 @@ Verify it works:
 
 Use `windows-debug` instead of `windows-release` for debugging.
 
+## Unity front end
+
+The core build copies `da_core.dll` into `unity/Assets/Plugins/x86_64/` automatically.
+The `unity/` folder must exist when you run `cmake --preset ...`, so configure again after
+cloning or after the Unity project is first added.
+
+1. Build the core (see above).
+2. In Unity Hub, choose **Add → Add project from disk** and select the `unity/` folder.
+3. Open `Assets/Scenes/SampleScene` and press **Play**.
+4. The Game view shows "C++ core loaded" and the core version. If it shows an error instead,
+   the message says what to do.
+
+**Important:** the Unity Editor keeps `da_core.dll` loaded until it is closed. Close Unity before
+rebuilding the core, otherwise the copy step fails because the file is in use.
+
 ## Troubleshooting
 
 | Error | Fix |
@@ -64,6 +79,8 @@ Use `windows-debug` instead of `windows-release` for debugging.
 | `cmake : The term 'cmake' is not recognized` | Open **Developer PowerShell for VS** instead of plain PowerShell. If it still fails, open Visual Studio Installer → Modify → select **C++ CMake tools for Windows**. |
 | `Could not find toolchain file: /scripts/buildsystems/vcpkg.cmake` | `VCPKG_ROOT` is not set. Follow step 3 above, then reopen the terminal. |
 | `could not find any instance of Visual Studio` | Install the **Desktop development with C++** workload. |
+| Unity: `da_core.dll was not found` | Build the core, then restart Unity. If `unity/Assets/Plugins/x86_64/` is still empty, run `cmake --preset windows-release` again (the `unity/` folder must exist at configure time). |
+| Build: copying `da_core.dll` fails (file in use) | Close Unity, then build again. |
 
 ## Folder layout
 
@@ -72,7 +89,8 @@ Use `windows-debug` instead of `windows-release` for debugging.
 | `core/` | C++ core library (`da_core.dll`). The only public contract: `core/include/da/da_api.h` |
 | `core/tests/` | Core tests |
 | `cli/` | Command-line tool (`ders-arsivi.exe`) |
-| `unity/` | Unity front-end project (added in the second half of step 1) |
+| `unity/` | Unity front-end project. C# code lives in `unity/Assets/Scripts/` |
+| `unity/Assets/Scripts/Core/` | `NativeCore.cs`: the C# layer over `da_api.h` |
 | `tools/` | Data protection check and git hooks |
 | `docs/` | Development documentation |
 
