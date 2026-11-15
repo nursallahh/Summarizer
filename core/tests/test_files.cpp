@@ -193,6 +193,16 @@ void test_inspect_and_import(const fs::path& root) {
     const smz::FileInfo pptx = smz::inspect_file(notes / smz::path_from_utf8("hafta3 ders.pptx"));
     check(pptx.type == "pptx" && pptx.pages == 3, "inspect: PowerPoint with 3 slides (rels not counted)");
 
+    // An Apple bookmark saved with a .pdf name (seen in real course folders).
+    write_file(root / "link" / "1BAA0159.pdf",
+               std::string("bplist00\xA3\x01\x02\x03_\x10\x46", 15) +
+                   "file:///Ders%205%20belgeler/Ge%C3%A7mi%C5%9F%20s%C4%B1nav.pdf" + std::string(8, '\0'));
+    const smz::FileInfo link = smz::inspect_file(root / "link" / "1BAA0159.pdf");
+    check(link.type == "unsupported", "Apple link file with a .pdf name is not treated as a PDF");
+    check(link.error.find("Apple link file") != std::string::npos, "Apple link file gets a clear explanation");
+    check(link.error.find("Ders 5 belgeler/Geçmiş sınav.pdf") != std::string::npos,
+          "Apple link file shows its percent-decoded target");
+
     const smz::FileInfo missing = smz::inspect_file(root / "yok.jpg");
     check(!missing.error.empty() && missing.type == "unsupported", "inspect: missing file reports an error");
 
