@@ -4,7 +4,7 @@ Bu belge projeyi bilgisayarınızda derlemek ve çalıştırmak için gereken ad
 
 ## İlk kurulum (bir kez)
 
-1. Visual Studio 2022'yi **"C++ ile masaüstü geliştirme"** iş yüküyle kurun.
+1. Visual Studio 2022 veya daha yeni bir sürümü **"C++ ile masaüstü geliştirme"** iş yüküyle kurun.
 2. CMake (3.25+) ve Git'i kurun.
 3. vcpkg'yi kurun ve yolunu ortam değişkeni olarak tanımlayın:
 
