@@ -9,8 +9,9 @@
 
 #include "scan.hpp"
 
-#include "classify/gemini.hpp"
+#include "classify/classifier.hpp"
 #include "csv.hpp"
+#include "files/image_prep.hpp"
 #include "files/office_text.hpp"
 #include "json_reader.hpp"
 #include "review_page.hpp"
@@ -23,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -283,9 +285,11 @@ bool write_table(const fs::path& out, const std::map<std::string, Row>& rows, ch
 
 struct ClassifyOptions {
     bool enabled = false;
+    std::string mode = "auto";  // auto: Gemini, then the local model; gemini; local
     std::string model = "gemini-3.5-flash-lite";
+    std::string local_model = "qwen3-vl:8b";
     std::string courses_file;
-    int requests_per_minute = 10;
+    int requests_per_minute = 0;  // 0: no fixed limit, only wait when the service asks to
     bool redo = false;
 };
 
@@ -320,21 +324,26 @@ std::vector<smz::Course> read_courses(const fs::path& file) {
     return courses;
 }
 
-// Returns an empty error on success.
+// Reads a file into a model input. Photos are rotated upright and scaled to 1600 px, which keeps
+// writing readable and makes requests small. Returns an empty error on success.
 std::string prepare_input(const Row& row, smz::ClassifyInput& input) {
-    // Inline requests are limited to about 20 MB including base64 overhead.
-    constexpr std::int64_t kMaxInlineBytes = 14 * 1024 * 1024;
     constexpr std::size_t kMaxTextChars = 40000;
     input.file_name = row.file_name;
-    static const std::map<std::string, std::string> kMime = {
-        {"jpeg", "image/jpeg"}, {"png", "image/png"}, {"webp", "image/webp"},
-        {"heic", "image/heic"}, {"pdf", "application/pdf"}};
     const fs::path path = path_from_utf8(row.path);
-    if (const auto it = kMime.find(row.type); it != kMime.end()) {
-        if (row.size > kMaxInlineBytes) {
-            return "file larger than 14 MB; large-file upload is not supported yet";
+    static const std::map<std::string, std::string> kImageMime = {
+        {"jpeg", "image/jpeg"}, {"png", "image/png"}, {"webp", "image/webp"}, {"heic", "image/heic"}};
+    if (const auto it = kImageMime.find(row.type); it != kImageMime.end()) {
+        if (auto image = smz::prepare_image(path, 1600, 85)) {
+            input.mime_type = "image/jpeg";
+            input.bytes = std::move(image->jpeg);
+            return "";
         }
-        input.mime_type = it->second;
+        input.mime_type = it->second;  // could not convert: send the original
+        input.bytes = read_file(path);
+        return input.bytes.empty() ? "could not read the file" : "";
+    }
+    if (row.type == "pdf") {
+        input.mime_type = "application/pdf";
         input.bytes = read_file(path);
         return input.bytes.empty() ? "could not read the file" : "";
     }
@@ -364,14 +373,7 @@ std::string prepare_input(const Row& row, smz::ClassifyInput& input) {
     return row.type + " files are not supported for classification yet";
 }
 
-const char* level_symbol(const std::string& level) {
-    return level == "high" ? "" : level == "medium" ? " (medium)" : " (low)";
-}
-
-// Classifies rows that have no suggestion yet. Saves the table after each file so that nothing is
-// lost if the run stops. Returns false if the run had to stop early.
-bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& options, const fs::path& out,
-                   char sep) {
+std::string read_api_key() {
     std::string key;
 #if defined(_WIN32)
     char* value = nullptr;
@@ -385,13 +387,24 @@ bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& opti
         key = value;
     }
 #endif
-    if (key.empty()) {
-        std::fprintf(stderr,
-                     "Error: no Gemini API key. Create one at https://aistudio.google.com/apikey, then run\n"
-                     "  setx GEMINI_API_KEY \"<your key>\"\n"
-                     "and open a new terminal.\n");
-        return false;
-    }
+    return key;
+}
+
+void print_ollama_help(const std::string& model) {
+    std::fprintf(stderr,
+                 "To use the local model:\n"
+                 "  1. Install Ollama from https://ollama.com/download and start it.\n"
+                 "  2. In a terminal run:  ollama pull %s\n"
+                 "  3. Run this command again; it continues where it stopped.\n",
+                 model.c_str());
+}
+
+// Classifies rows that have no suggestion yet, several files per request. Uses Gemini first and
+// switches to the local model when the daily quota is used up, the key is rejected or there is no
+// internet. Saves the table after every request so nothing is lost if the run stops.
+// Returns false if the run had to stop early.
+bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& options, const fs::path& out,
+                   char sep) {
     const fs::path courses_path = options.courses_file.empty() ? out.parent_path() / "courses.txt"
                                                                : path_from_utf8(options.courses_file);
     const std::vector<smz::Course> courses = read_courses(courses_path);
@@ -404,7 +417,39 @@ bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& opti
     }
     std::printf("Courses (%zu) from %s\n", courses.size(), path_to_utf8(courses_path).c_str());
 
-    const smz::GeminiClassifier classifier(key, options.model, courses);
+    std::unique_ptr<smz::Classifier> gemini;
+    std::unique_ptr<smz::Classifier> local;
+    const bool local_allowed = options.mode != "gemini";
+    if (local_allowed) {
+        local = std::make_unique<smz::OllamaClassifier>(options.local_model, courses);
+    }
+    if (options.mode != "local") {
+        const std::string key = read_api_key();
+        if (!key.empty()) {
+            gemini = std::make_unique<smz::GeminiClassifier>(key, options.model, courses);
+        } else if (!local_allowed) {
+            std::fprintf(stderr,
+                         "Error: no Gemini API key. Create one at https://aistudio.google.com/apikey, then run\n"
+                         "  setx GEMINI_API_KEY \"<your key>\"\n"
+                         "and open a new terminal.\n");
+            return false;
+        } else {
+            std::printf("No GEMINI_API_KEY found; using the local model.\n");
+        }
+    }
+    const smz::Classifier* current = gemini ? gemini.get() : local.get();
+    auto model_label = [&](const smz::Classifier* c) {
+        return c == local.get() ? "local:" + c->model() : c->model();
+    };
+    auto switch_to_local = [&](const std::string& why) {
+        if (!local_allowed || current == local.get()) {
+            return false;
+        }
+        std::printf("\n%s -> continuing with the local model (%s via Ollama).\n", why.c_str(),
+                    options.local_model.c_str());
+        current = local.get();
+        return true;
+    };
 
     std::vector<Row*> todo;
     for (const Row* r : ordered_rows(rows)) {
@@ -417,51 +462,129 @@ bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& opti
         std::printf("Every file already has a suggestion. Use --redo to ask again.\n");
         return true;
     }
-    std::printf("Asking %s about %zu files (about %d per minute)...\n", options.model.c_str(), todo.size(),
-                options.requests_per_minute);
+    std::printf("%zu files to classify with %s.\n", todo.size(), model_label(current).c_str());
 
-    const auto interval = std::chrono::milliseconds(60000 / std::max(1, options.requests_per_minute));
+    const auto started = std::chrono::steady_clock::now();
+    const auto min_interval = options.requests_per_minute > 0
+                                  ? std::chrono::milliseconds(60000 / options.requests_per_minute)
+                                  : std::chrono::milliseconds(0);
     auto next_request = std::chrono::steady_clock::now();
+    std::map<Row*, smz::ClassifyInput> prepared;  // kept when switching models
     long long tokens = 0;
     int done = 0;
     int failed = 0;
-    for (std::size_t i = 0; i < todo.size(); ++i) {
-        Row& row = *todo[i];
-        std::printf("[%zu/%zu] %s: ", i + 1, todo.size(), row.file_name.c_str());
-        std::fflush(stdout);
-
-        smz::ClassifyInput input;
-        const std::string unsupported = prepare_input(row, input);
-        if (!unsupported.empty()) {
-            row.kept["classify_error"] = unsupported;
-            std::printf("skipped, %s\n", unsupported.c_str());
-            ++failed;
-            write_table(out, rows, sep);
+    std::size_t i = 0;
+    while (i < todo.size()) {
+        // Build the next request: consecutive files (photos in capture order) up to the model's limits.
+        std::vector<Row*> batch_rows;
+        std::vector<smz::ClassifyInput> batch;
+        std::size_t batch_bytes = 0;
+        std::size_t j = i;
+        for (; j < todo.size() && batch.size() < current->max_batch_files(); ++j) {
+            Row* row = todo[j];
+            auto it = prepared.find(row);
+            if (it == prepared.end()) {
+                smz::ClassifyInput input;
+                if (const std::string error = prepare_input(*row, input); !error.empty()) {
+                    row->kept["classify_error"] = error;
+                    ++failed;
+                    std::printf("  %s: skipped, %s\n", row->file_name.c_str(), error.c_str());
+                    prepared[row] = {};
+                    continue;
+                }
+                it = prepared.emplace(row, std::move(input)).first;
+            }
+            if (it->second.file_name.empty()) {
+                continue;  // could not be prepared
+            }
+            const std::size_t size = it->second.bytes.size() + it->second.text.size();
+            if (const std::string reason = current->cannot_read(it->second); !reason.empty()) {
+                row->kept["classify_error"] = reason;
+                ++failed;
+                std::printf("  %s: skipped, %s\n", row->file_name.c_str(), reason.c_str());
+                continue;
+            }
+            if (!batch.empty() && batch_bytes + size > current->max_batch_bytes()) {
+                break;
+            }
+            batch_rows.push_back(row);
+            batch.push_back(it->second);
+            batch_bytes += size;
+        }
+        if (batch.empty()) {
+            i = j;
             continue;
         }
 
-        smz::ClassifyResult result;
+        std::printf("[%zu-%zu / %zu] %s, %zu file%s (%.1f MB)... ", i + 1, j, todo.size(),
+                    model_label(current).c_str(), batch.size(), batch.size() == 1 ? "" : "s",
+                    static_cast<double>(batch_bytes) / (1024.0 * 1024.0));
+        std::fflush(stdout);
+
+        std::vector<smz::ClassifyResult> results;
         for (int attempt = 0; attempt < 6; ++attempt) {
             std::this_thread::sleep_until(next_request);
-            next_request = std::chrono::steady_clock::now() + interval;
-            result = classifier.classify(input);
-            if (result.error == smz::ApiError::Network && attempt >= 1) {
-                break;  // still offline after one retry: stop instead of waiting on every file
+            next_request = std::chrono::steady_clock::now() + min_interval;
+            results = current->classify_batch(batch);
+            const smz::ApiError e = results.front().error;
+            const bool all_same = std::all_of(results.begin(), results.end(),
+                                              [&](const smz::ClassifyResult& r) { return r.error == e; });
+            if (!all_same || (e != smz::ApiError::RateLimited && e != smz::ApiError::Server &&
+                              !(e == smz::ApiError::Network && attempt == 0))) {
+                break;
             }
-            if (result.error == smz::ApiError::RateLimited || result.error == smz::ApiError::Server ||
-                result.error == smz::ApiError::Network) {
-                const int wait = result.retry_after_seconds > 0 ? result.retry_after_seconds : 15 * (attempt + 1);
-                std::printf("busy (%s), waiting %d s... ", result.message.c_str(), wait);
-                std::fflush(stdout);
-                next_request = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
-                continue;
+            const int wait = results.front().retry_after_seconds > 0 ? results.front().retry_after_seconds
+                                                                      : 5 * (attempt + 1);
+            std::printf("busy, waiting %d s... ", wait);
+            std::fflush(stdout);
+            next_request = std::chrono::steady_clock::now() + std::chrono::seconds(wait);
+        }
+        std::printf("\n");
+
+        // Request-level problems: switch models or stop.
+        const smz::ClassifyResult& first = results.front();
+        const bool request_failed = std::all_of(results.begin(), results.end(),
+                                                [&](const smz::ClassifyResult& r) { return r.error == first.error; }) &&
+                                    first.error != smz::ApiError::None;
+        if (request_failed) {
+            const std::string why = first.message;
+            if (current == gemini.get()) {
+                if (first.error == smz::ApiError::DailyQuota && switch_to_local("The free daily Gemini quota is used up")) {
+                    continue;
+                }
+                if (first.error == smz::ApiError::Network && switch_to_local("No internet connection")) {
+                    continue;
+                }
+                if (first.error == smz::ApiError::BadKey && switch_to_local("The Gemini API key was rejected")) {
+                    continue;
+                }
+                if (first.error == smz::ApiError::RateLimited && switch_to_local("Gemini keeps refusing requests")) {
+                    continue;
+                }
             }
-            break;
+            const bool fatal = first.error == smz::ApiError::DailyQuota || first.error == smz::ApiError::Network ||
+                               first.error == smz::ApiError::BadKey || first.error == smz::ApiError::ModelNotFound ||
+                               first.error == smz::ApiError::RateLimited || first.error == smz::ApiError::Server;
+            if (fatal) {
+                write_table(out, rows, sep);
+                std::fprintf(stderr, "\nStopped: %s\n", why.c_str());
+                if (current == local.get()) {
+                    print_ollama_help(options.local_model);
+                } else if (first.error == smz::ApiError::ModelNotFound) {
+                    std::fprintf(stderr, "Try another model with --model, for example --model gemini-2.5-flash-lite\n");
+                } else if (first.error == smz::ApiError::BadKey) {
+                    std::fprintf(stderr, "Check GEMINI_API_KEY.\n");
+                }
+                std::fprintf(stderr, "Everything done so far is saved; run the same command again to continue.\n");
+                return false;
+            }
         }
 
-        switch (result.error) {
-            case smz::ApiError::None: {
-                const smz::Suggestion& s = result.suggestion;
+        for (std::size_t k = 0; k < batch.size(); ++k) {
+            Row& row = *batch_rows[k];
+            const smz::ClassifyResult& r = results[k];
+            if (r.error == smz::ApiError::None) {
+                const smz::Suggestion& s = r.suggestion;
                 std::string also;
                 for (const std::string& o : s.other_courses) {
                     also += (also.empty() ? "" : " | ") + o;
@@ -472,53 +595,30 @@ bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& opti
                 row.kept["kind"] = s.kind;
                 row.kept["topic"] = s.topic;
                 row.kept["evidence"] = s.evidence;
-                row.kept["model"] = options.model;
+                row.kept["model"] = model_label(current);
                 row.kept.erase("classify_error");
                 tokens += s.tokens;
                 ++done;
-                std::printf("%s%s\n", s.course.c_str(), level_symbol(s.level));
-                break;
-            }
-            case smz::ApiError::DailyQuota:
-                std::printf("\n");
-                std::fprintf(stderr,
-                             "The free daily quota is used up (%s).\n"
-                             "Everything done so far is saved. Run the same command tomorrow to continue.\n",
-                             result.message.c_str());
-                write_table(out, rows, sep);
-                return false;
-            case smz::ApiError::Network:
-                std::printf("\n");
-                std::fprintf(stderr,
-                             "No connection to Gemini (%s).\n"
-                             "Everything done so far is saved. Run the same command again when you are online.\n",
-                             result.message.c_str());
-                write_table(out, rows, sep);
-                return false;
-            case smz::ApiError::BadKey:
-                std::printf("\n");
-                std::fprintf(stderr, "The API key was rejected (%s). Check GEMINI_API_KEY.\n", result.message.c_str());
-                return false;
-            case smz::ApiError::ModelNotFound:
-                std::printf("\n");
-                std::fprintf(stderr,
-                             "The model \"%s\" is not available (%s).\n"
-                             "Try another one with --model, for example --model gemini-2.5-flash-lite\n",
-                             options.model.c_str(), result.message.c_str());
-                return false;
-            default:
-                row.kept["classify_error"] = result.message;
+                std::printf("  %s: %s%s\n", row.file_name.c_str(), s.course.c_str(),
+                            s.level == "high" ? "" : (" (" + s.level + ")").c_str());
+            } else {
+                row.kept["classify_error"] = r.message;
                 ++failed;
-                std::printf("failed, %s\n", result.message.c_str());
-                break;
+                std::printf("  %s: failed, %s\n", row.file_name.c_str(), r.message.c_str());
+            }
         }
         if (!write_table(out, rows, sep)) {
             std::fprintf(stderr, "Error: could not save the table. Is it open in Excel? Close it and run again.\n");
             return false;
         }
+        i = j;
     }
-    std::printf("\nSuggestions: %d new, %d could not be classified (see classify_error). Tokens used: %lld\n", done,
-                failed, tokens);
+    failed = static_cast<int>(std::count_if(todo.begin(), todo.end(), [](const Row* r) {
+        return !r->get("classify_error").empty() && r->get("suggested_course").empty();
+    }));
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started).count();
+    std::printf("\nSuggestions: %d new, %d could not be classified (see classify_error). %lld s, %lld tokens.\n", done,
+                failed, static_cast<long long>(seconds), tokens);
     return true;
 }
 
@@ -568,26 +668,31 @@ void print_scan_help() {
     std::printf(
         "summarizer scan <folder> [--out <file.csv>] [--no-recursive]\n"
         "summarizer classify <folder> [--out <file.csv>] [--courses <courses.txt>] [--model <id>]\n"
-        "                    [--rpm <requests per minute>] [--redo] [--no-recursive]\n"
+        "                    [--local-model <name>] [--only gemini|local] [--rpm <n>] [--redo]\n"
+        "                    [--no-recursive]\n"
         "\n"
         "  scan reads every file in <folder> (read-only) and writes a CSV table with one row\n"
         "  per distinct file content.\n"
         "\n"
-        "  classify does the same, then asks Gemini for a course suggestion for each file that\n"
-        "  has none yet, and writes <table>-review.html next to the table. Open it in a browser,\n"
-        "  correct the wrong suggestions, and save the reviewed table over the old one.\n"
-        "  Needs the GEMINI_API_KEY environment variable and a courses.txt next to the table:\n"
-        "  one course per line, \"Course name | optional description\".\n"
+        "  classify does the same, then suggests a course for each file that has none yet, and\n"
+        "  writes <table>-review.html next to the table. Open it in a browser, correct the wrong\n"
+        "  suggestions, and save the reviewed table over the old one.\n"
+        "  It uses Gemini (GEMINI_API_KEY) and sends several files per request. When the daily\n"
+        "  quota is used up or there is no internet, it continues with a local model via Ollama.\n"
+        "  Needs courses.txt next to the table: one course per line,\n"
+        "  \"Course name | optional description\".\n"
         "\n"
         "  Running either command again keeps courses, notes and suggestions already in the table.\n"
         "\n"
-        "  --out <file.csv>   Where to write the table.\n"
-        "                     Default: next to the folder, named <folder>-scan.csv\n"
-        "  --courses <file>   Course list. Default: courses.txt next to the table.\n"
-        "  --model <id>       Gemini model. Default: gemini-3.5-flash-lite\n"
-        "  --rpm <n>          Requests per minute (default 10; the free tier allows only a few).\n"
-        "  --redo             Ask again for files that already have a suggestion.\n"
-        "  --no-recursive     Do not include sub-folders.\n"
+        "  --out <file.csv>      Where to write the table.\n"
+        "                        Default: next to the folder, named <folder>-scan.csv\n"
+        "  --courses <file>      Course list. Default: courses.txt next to the table.\n"
+        "  --model <id>          Gemini model. Default: gemini-3.5-flash-lite\n"
+        "  --local-model <name>  Ollama model. Default: qwen3-vl:8b\n"
+        "  --only gemini|local   Use only one of the two.\n"
+        "  --rpm <n>             At most n requests per minute (default: as fast as allowed).\n"
+        "  --redo                Ask again for files that already have a suggestion.\n"
+        "  --no-recursive        Do not include sub-folders.\n"
         "\n"
         "  The table must be saved outside any git repository; the command refuses otherwise.\n");
 }
@@ -608,8 +713,16 @@ int run_scan(const std::vector<std::string>& args, bool classify) {
             options.courses_file = args[++i];
         } else if (classify && args[i] == "--model" && has_value) {
             options.model = args[++i];
+        } else if (classify && args[i] == "--local-model" && has_value) {
+            options.local_model = args[++i];
+        } else if (classify && args[i] == "--only" && has_value) {
+            options.mode = args[++i];
+            if (options.mode != "gemini" && options.mode != "local") {
+                std::fprintf(stderr, "--only must be gemini or local\n");
+                return 2;
+            }
         } else if (classify && args[i] == "--rpm" && has_value) {
-            options.requests_per_minute = std::max(1, std::atoi(args[++i].c_str()));
+            options.requests_per_minute = std::max(0, std::atoi(args[++i].c_str()));
         } else if (classify && args[i] == "--redo") {
             options.redo = true;
         } else if (args[i] == "--help" || args[i] == "-h") {
