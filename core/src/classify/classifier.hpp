@@ -8,6 +8,7 @@
 #include "net/http.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -88,15 +89,28 @@ public:
 
     std::vector<ClassifyResult> classify_batch(const std::vector<ClassifyInput>& inputs) const override;
     std::size_t max_batch_files() const override { return 10; }
-    std::size_t max_batch_bytes() const override { return 13u * 1024u * 1024u; }  // request limit is ~20 MB as base64
+    // Inline data per request (the request limit is ~20 MB as base64). A larger file is uploaded
+    // with the Files API instead, sent alone, and deleted right after.
+    std::size_t max_batch_bytes() const override { return 13u * 1024u * 1024u; }
+    static constexpr std::size_t kUploadAbove = 8u * 1024u * 1024u;
     std::string cannot_read(const ClassifyInput& input) const override;
     std::string model() const override { return model_; }
 
     // Exposed for tests.
-    std::string build_request_body(const std::vector<ClassifyInput>& inputs) const;
+    // `uploaded[i]` is the Files API URI for inputs[i], or empty to send it inline.
+    std::string build_request_body(const std::vector<ClassifyInput>& inputs,
+                                   const std::vector<std::string>& uploaded = {}) const;
     std::vector<ClassifyResult> parse_response(int status, const std::string& body, std::size_t count) const;
 
 private:
+    struct Upload {
+        std::string name;  // files/abc123
+        std::string uri;
+    };
+    // Returns the upload, or an error result.
+    std::optional<Upload> upload(const ClassifyInput& input, ClassifyResult& error) const;
+    void delete_upload(const Upload& upload) const;
+
     std::string api_key_;
     std::string model_;
     std::vector<Course> courses_;

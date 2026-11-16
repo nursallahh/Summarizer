@@ -291,6 +291,7 @@ struct ClassifyOptions {
     std::string courses_file;
     int requests_per_minute = 0;  // 0: no fixed limit, only wait when the service asks to
     bool redo = false;
+    bool redo_unmatched = false;  // ask again for unconfirmed "(course not in list)" and "(unreadable)"
 };
 
 std::vector<smz::Course> read_courses(const fs::path& file) {
@@ -454,7 +455,10 @@ bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& opti
     std::vector<Row*> todo;
     for (const Row* r : ordered_rows(rows)) {
         Row* row = &rows[r->sha256];
-        if (!row->missing && (options.redo || row->get("suggested_course").empty())) {
+        const std::string suggested = row->get("suggested_course");
+        const bool unmatched = row->get("course").empty() &&
+                               (suggested == smz::kCourseNotInList || suggested == smz::kUnreadable);
+        if (!row->missing && (options.redo || suggested.empty() || (options.redo_unmatched && unmatched))) {
             todo.push_back(row);
         }
     }
@@ -580,6 +584,20 @@ bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& opti
             }
         }
 
+        // Files without a usable answer are asked again on their own once: in a batch one difficult
+        // file (e.g. a recitation stop) can spoil the whole answer.
+        for (std::size_t k = 0; k < batch.size(); ++k) {
+            const smz::ApiError e = results[k].error;
+            if (e == smz::ApiError::BadResponse || e == smz::ApiError::Blocked) {
+                std::this_thread::sleep_until(next_request);
+                next_request = std::chrono::steady_clock::now() + min_interval;
+                const smz::ClassifyResult retry = current->classify(batch[k]);
+                if (retry.error == smz::ApiError::None) {
+                    results[k] = retry;
+                }
+            }
+        }
+
         for (std::size_t k = 0; k < batch.size(); ++k) {
             Row& row = *batch_rows[k];
             const smz::ClassifyResult& r = results[k];
@@ -669,6 +687,7 @@ void print_scan_help() {
         "summarizer scan <folder> [--out <file.csv>] [--no-recursive]\n"
         "summarizer classify <folder> [--out <file.csv>] [--courses <courses.txt>] [--model <id>]\n"
         "                    [--local-model <name>] [--only gemini|local] [--rpm <n>] [--redo]\n"
+        "                    [--redo-unmatched]\n"
         "                    [--no-recursive]\n"
         "\n"
         "  scan reads every file in <folder> (read-only) and writes a CSV table with one row\n"
@@ -692,6 +711,8 @@ void print_scan_help() {
         "  --only gemini|local   Use only one of the two.\n"
         "  --rpm <n>             At most n requests per minute (default: as fast as allowed).\n"
         "  --redo                Ask again for files that already have a suggestion.\n"
+        "  --redo-unmatched      Ask again for unconfirmed files suggested as \"(course not in list)\"\n"
+        "                        or \"(unreadable)\", e.g. after adding a course to courses.txt.\n"
         "  --no-recursive        Do not include sub-folders.\n"
         "\n"
         "  The table must be saved outside any git repository; the command refuses otherwise.\n");
@@ -725,6 +746,8 @@ int run_scan(const std::vector<std::string>& args, bool classify) {
             options.requests_per_minute = std::max(0, std::atoi(args[++i].c_str()));
         } else if (classify && args[i] == "--redo") {
             options.redo = true;
+        } else if (classify && args[i] == "--redo-unmatched") {
+            options.redo_unmatched = true;
         } else if (args[i] == "--help" || args[i] == "-h") {
             print_scan_help();
             return 0;

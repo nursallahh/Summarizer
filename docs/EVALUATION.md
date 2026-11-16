@@ -41,7 +41,9 @@ This scans the folder, suggests a course for every file that has none yet, and w
 How it stays fast:
 
 - Photos are rotated upright and scaled to 1600 px (about 300 KB) before sending.
-- Gemini gets up to 10 files per request, so 70 files take about 7 requests.
+- Gemini gets up to 10 files per request, so 70 files take about 7 requests. Files over 8 MB are uploaded
+  with the Files API, sent alone, and deleted from the server right after.
+- A file without a usable answer is asked again on its own.
 - There is no fixed delay; the command only waits when Gemini asks it to.
 
 When the free daily quota is used up, there is no internet, or the key is rejected, the command
@@ -56,7 +58,9 @@ yet; those keep an error and are sent to Gemini on the next run. The `model` col
 which model made each suggestion.
 
 Options: `--model <id>` (default `gemini-3.5-flash-lite`), `--local-model <name>` (default `qwen3-vl:8b`),
-`--only gemini|local`, `--rpm <n>` to cap requests per minute, `--redo` to ask again.
+`--only gemini|local`, `--rpm <n>` to cap requests per minute, `--redo` to ask again,
+`--redo-unmatched` to ask again about unconfirmed "(course not in list)" and "(unreadable)" files after
+adding a course to `courses.txt`.
 
 ## 3. Review
 
