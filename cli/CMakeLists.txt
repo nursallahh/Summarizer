@@ -3,6 +3,7 @@ add_executable(summarizer_cli
     scan.cpp
     report.cpp
     review_page.cpp
+    reviewed.cpp
     csv.cpp
 )
 # Phase 0 tools also use core internals directly (classification, file reading).
@@ -13,4 +14,5 @@ if(WIN32)
     # Runs the tool with the UTF-8 code page, so command-line arguments such as Turkish
     # folder names arrive as UTF-8 (Windows 10 1903 and later).
     target_sources(summarizer_cli PRIVATE summarizer.manifest)
+    target_link_libraries(summarizer_cli PRIVATE shell32 ole32)
 endif()

@@ -60,7 +60,8 @@ which model made each suggestion.
 Options: `--model <id>` (default `gemini-3.5-flash-lite`), `--local-model <name>` (default `qwen3-vl:8b`),
 `--only gemini|local`, `--rpm <n>` to cap requests per minute, `--redo` to ask again,
 `--redo-unmatched` to ask again about unconfirmed "(course not in list)" and "(unreadable)" files after
-adding a course to `courses.txt`.
+adding a course to `courses.txt`, and `--redo-unconfirmed` to ask again about every file without a
+confirmed course.
 
 ## 3. Review
 
@@ -69,6 +70,10 @@ course of any file that is wrong, then press **Confirm group**. Use the **Model 
 the doubtful ones first. Press **Save reviewed table** and save it over `dersnotlari-scan.csv`.
 
 Only confirmed or changed files get a course; anything you skip stays unreviewed and is not counted.
+
+If the browser saves the table somewhere else (usually Downloads, possibly as `dersnotlari-scan (1).csv`),
+nothing needs to be moved: `classify`, `scan` and `report` use the newest saved copy next to the table or
+in Downloads when it is newer than the table.
 
 ## 4. Report
 

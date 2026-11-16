@@ -248,7 +248,7 @@ document.getElementById("save").onclick = async () => {
     } catch (e) { if (e && e.name === "AbortError") return; }
   }
   const a = el("a"); a.href = URL.createObjectURL(blob); a.download = D.table; a.click();
-  toast("Downloaded " + D.table + ". Move it over the old table.");
+  toast("Downloaded " + D.table + ". Summarizer finds it in Downloads; no need to move it.");
 };
 
 document.getElementById("title").textContent = "Review: " + D.title;

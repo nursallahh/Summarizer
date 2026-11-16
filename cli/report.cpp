@@ -6,6 +6,7 @@
 // Files without a confirmed course are reported as "not reviewed", never counted as correct.
 
 #include "csv.hpp"
+#include "reviewed.hpp"
 #include "scan.hpp"
 
 #include <algorithm>
@@ -69,7 +70,8 @@ int run_report(const std::vector<std::string>& args) {
     }
     std::stringstream buffer;
     buffer << in.rdbuf();
-    const std::vector<CsvRow> rows = parse_csv(to_utf8_if_needed(buffer.str()));
+    std::vector<CsvRow> rows = parse_csv(to_utf8_if_needed(buffer.str()));
+    const ReviewedSave save = find_newer_reviewed_save(file);
     if (rows.empty()) {
         std::fprintf(stderr, "Error: the table is empty\n");
         return 1;
@@ -95,6 +97,17 @@ int run_report(const std::vector<std::string>& args) {
     auto cell = [](const CsvRow& row, int col) {
         return col >= 0 && col < static_cast<int>(row.size()) ? row[static_cast<std::size_t>(col)] : std::string();
     };
+    if (!save.file.empty()) {
+        // The newest reviewed save wins (read only; run classify or scan to write it into the table).
+        for (std::size_t r = 1; r < rows.size(); ++r) {
+            const auto it = save.by_sha.find(cell(rows[r], 0));
+            if (it != save.by_sha.end() && course_col < static_cast<int>(rows[r].size())) {
+                rows[r][static_cast<std::size_t>(course_col)] = it->second.course;
+            }
+        }
+        const std::u8string u8 = save.file.u8string();
+        std::printf("Using the reviewed courses saved in %s\n\n", reinterpret_cast<const char*>(u8.c_str()));
+    }
 
     Tally overall;
     std::map<std::string, Tally> by_type;

@@ -15,6 +15,7 @@
 #include "files/office_text.hpp"
 #include "json_reader.hpp"
 #include "review_page.hpp"
+#include "reviewed.hpp"
 #include "smz/smz_api.h"
 
 #include <algorithm>
@@ -291,7 +292,8 @@ struct ClassifyOptions {
     std::string courses_file;
     int requests_per_minute = 0;  // 0: no fixed limit, only wait when the service asks to
     bool redo = false;
-    bool redo_unmatched = false;  // ask again for unconfirmed "(course not in list)" and "(unreadable)"
+    bool redo_unmatched = false;    // ask again for unconfirmed "(course not in list)" and "(unreadable)"
+    bool redo_unconfirmed = false;  // ask again for every file without a confirmed course
 };
 
 std::vector<smz::Course> read_courses(const fs::path& file) {
@@ -458,7 +460,9 @@ bool classify_rows(std::map<std::string, Row>& rows, const ClassifyOptions& opti
         const std::string suggested = row->get("suggested_course");
         const bool unmatched = row->get("course").empty() &&
                                (suggested == smz::kCourseNotInList || suggested == smz::kUnreadable);
-        if (!row->missing && (options.redo || suggested.empty() || (options.redo_unmatched && unmatched))) {
+        const bool unconfirmed = row->get("course").empty();
+        if (!row->missing && (options.redo || suggested.empty() || (options.redo_unmatched && unmatched) ||
+                              (options.redo_unconfirmed && unconfirmed))) {
             todo.push_back(row);
         }
     }
@@ -687,7 +691,7 @@ void print_scan_help() {
         "summarizer scan <folder> [--out <file.csv>] [--no-recursive]\n"
         "summarizer classify <folder> [--out <file.csv>] [--courses <courses.txt>] [--model <id>]\n"
         "                    [--local-model <name>] [--only gemini|local] [--rpm <n>] [--redo]\n"
-        "                    [--redo-unmatched]\n"
+        "                    [--redo-unmatched] [--redo-unconfirmed]\n"
         "                    [--no-recursive]\n"
         "\n"
         "  scan reads every file in <folder> (read-only) and writes a CSV table with one row\n"
@@ -702,6 +706,8 @@ void print_scan_help() {
         "  \"Course name | optional description\".\n"
         "\n"
         "  Running either command again keeps courses, notes and suggestions already in the table.\n"
+        "  A reviewed table saved by the review page next to the table or in Downloads (also as\n"
+        "  \"<table> (1).csv\") is picked up automatically if it is newer than the table.\n"
         "\n"
         "  --out <file.csv>      Where to write the table.\n"
         "                        Default: next to the folder, named <folder>-scan.csv\n"
@@ -713,6 +719,7 @@ void print_scan_help() {
         "  --redo                Ask again for files that already have a suggestion.\n"
         "  --redo-unmatched      Ask again for unconfirmed files suggested as \"(course not in list)\"\n"
         "                        or \"(unreadable)\", e.g. after adding a course to courses.txt.\n"
+        "  --redo-unconfirmed    Ask again for every file without a confirmed course.\n"
         "  --no-recursive        Do not include sub-folders.\n"
         "\n"
         "  The table must be saved outside any git repository; the command refuses otherwise.\n");
@@ -748,6 +755,8 @@ int run_scan(const std::vector<std::string>& args, bool classify) {
             options.redo = true;
         } else if (classify && args[i] == "--redo-unmatched") {
             options.redo_unmatched = true;
+        } else if (classify && args[i] == "--redo-unconfirmed") {
+            options.redo_unconfirmed = true;
         } else if (args[i] == "--help" || args[i] == "-h") {
             print_scan_help();
             return 0;
@@ -792,6 +801,23 @@ int run_scan(const std::vector<std::string>& args, bool classify) {
     }
 
     std::map<std::string, Row> previous = read_existing_table(out);
+    if (const ReviewedSave save = find_newer_reviewed_save(out); !save.file.empty()) {
+        int merged = 0;
+        for (const auto& [sha, labels] : save.by_sha) {
+            auto it = previous.find(sha);
+            if (it == previous.end()) {
+                continue;
+            }
+            Row& row = it->second;
+            if (row.get("course") != labels.course || row.get("notes") != labels.notes) {
+                row.kept["course"] = labels.course;
+                row.kept["notes"] = labels.notes;
+                ++merged;
+            }
+        }
+        std::printf("Using the reviewed courses saved in %s (%d rows updated).\n", path_to_utf8(save.file).c_str(),
+                    merged);
+    }
     if (!previous.empty()) {
         std::printf("Keeping labels and suggestions from the existing table (%zu rows).\n", previous.size());
     }
