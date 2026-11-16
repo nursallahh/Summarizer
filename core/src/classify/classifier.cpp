@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <chrono>
+#include <thread>
 #include <utility>
 
 namespace smz {
@@ -81,8 +83,9 @@ std::string prompt_for(const std::vector<Course>& courses, std::size_t file_coun
          "- If the file also covers other listed courses, put them in other_courses.\n"
          "- level: high only if the content clearly matches one course; medium if likely; low if mostly guessing.\n"
          "- kind: exam_or_quiz when the page consists of questions only (an exam, quiz or past paper).\n"
-         "- topic: the main topic heading as written in the file, in the file's language, at most 80 characters.\n"
-         "- evidence: at most 20 words naming what in the file decided it.\n";
+         "- topic: the main topic as a short heading of at most 10 words, in the file's language.\n"
+         "- evidence: at most 20 words, in your own words, naming what in the file decided it. Do not copy\n"
+         "  sentences from the file.\n";
     return p;
 }
 
@@ -185,18 +188,22 @@ GeminiClassifier::GeminiClassifier(std::string api_key, std::string model, std::
       transport_(std::move(transport)) {}
 
 std::string GeminiClassifier::cannot_read(const ClassifyInput& input) const {
-    if (!input.bytes.empty() && input.bytes.size() > max_batch_bytes()) {
-        return "file larger than 13 MB; large-file upload is not supported yet";
+    if (input.bytes.size() > 1024u * 1024u * 1024u) {
+        return "file larger than 1 GB";
     }
     return {};
 }
 
-std::string GeminiClassifier::build_request_body(const std::vector<ClassifyInput>& inputs) const {
+std::string GeminiClassifier::build_request_body(const std::vector<ClassifyInput>& inputs,
+                                                 const std::vector<std::string>& uploaded) const {
     std::string parts = "{\"text\":" + json_str(prompt_for(courses_, inputs.size())) + "}";
     for (std::size_t i = 0; i < inputs.size(); ++i) {
         const ClassifyInput& in = inputs[i];
         parts += ",{\"text\":" + json_str("File " + std::to_string(i + 1) + ": " + in.file_name) + "}";
-        if (!in.bytes.empty()) {
+        if (i < uploaded.size() && !uploaded[i].empty()) {
+            parts += ",{\"file_data\":{\"mime_type\":" + json_str(in.mime_type) +
+                     ",\"file_uri\":" + json_str(uploaded[i]) + "}}";
+        } else if (!in.bytes.empty()) {
             parts += ",{\"inline_data\":{\"mime_type\":" + json_str(in.mime_type) + ",\"data\":\"" +
                      base64_encode(in.bytes) + "\"}}";
         }
@@ -215,12 +222,32 @@ std::vector<ClassifyResult> GeminiClassifier::classify_batch(const std::vector<C
     if (inputs.empty()) {
         return {};
     }
+    std::vector<Upload> uploads;
+    std::vector<std::string> uploaded(inputs.size());
+    for (std::size_t i = 0; i < inputs.size(); ++i) {
+        if (inputs[i].bytes.size() > kUploadAbove) {
+            ClassifyResult error;
+            const std::optional<Upload> up = upload(inputs[i], error);
+            if (!up) {
+                for (const Upload& u : uploads) {
+                    delete_upload(u);
+                }
+                return same_for_all(inputs.size(), error);
+            }
+            uploads.push_back(*up);
+            uploaded[i] = up->uri;
+        }
+    }
+
     HttpRequest request;
     request.url = "https://generativelanguage.googleapis.com/v1beta/models/" + model_ + ":generateContent";
     request.headers = {{"Content-Type", "application/json"}, {"x-goog-api-key", api_key_}};
-    request.body = build_request_body(inputs);
+    request.body = build_request_body(inputs, uploaded);
     request.timeout_seconds = 300;
     const HttpResponse response = transport_(request);
+    for (const Upload& u : uploads) {
+        delete_upload(u);  // do not leave the user's files on the server
+    }
     if (response.status == 0) {
         ClassifyResult r;
         r.error = ApiError::Network;
@@ -313,7 +340,8 @@ std::vector<ClassifyResult> GeminiClassifier::parse_response(int status, const s
         }
     }
     if (text.empty()) {
-        r.error = finish == "SAFETY" || finish == "PROHIBITED_CONTENT" ? ApiError::Blocked : ApiError::BadResponse;
+        r.error = finish == "SAFETY" || finish == "PROHIBITED_CONTENT" || finish == "RECITATION" ? ApiError::Blocked
+                                                                                                : ApiError::BadResponse;
         r.message = "empty answer (finish reason: " + finish + ")";
         return same_for_all(count, r);
     }
@@ -321,7 +349,7 @@ std::vector<ClassifyResult> GeminiClassifier::parse_response(int status, const s
     const JsonValue* files = answer ? answer->find("files") : nullptr;
     if (files == nullptr || files->type != JsonValue::Type::Array) {
         r.error = ApiError::BadResponse;
-        r.message = "the answer is not the expected JSON" + (finish == "MAX_TOKENS" ? std::string(" (cut off)") : "");
+        r.message = "the answer is not the expected JSON (finish reason: " + finish + ")";
         return same_for_all(count, r);
     }
 
@@ -340,6 +368,85 @@ std::vector<ClassifyResult> GeminiClassifier::parse_response(int status, const s
     }
     results[0].suggestion.tokens = tokens;
     return results;
+}
+
+std::optional<GeminiClassifier::Upload> GeminiClassifier::upload(const ClassifyInput& input,
+                                                                  ClassifyResult& error) const {
+    const std::string base = "https://generativelanguage.googleapis.com";
+    auto fail = [&](const HttpResponse& response, const std::string& step) -> std::optional<Upload> {
+        if (response.status == 0) {
+            error.error = ApiError::Network;
+            error.message = response.error;
+        } else {
+            error = parse_response(response.status, response.body, 1).front();
+            if (error.error == ApiError::None || response.status == 200) {
+                error.error = ApiError::BadResponse;
+            }
+            error.message = "upload (" + step + "): " + error.message;
+        }
+        return std::nullopt;
+    };
+
+    // 1. Start a resumable upload. The file name is not sent.
+    HttpRequest start;
+    start.url = base + "/upload/v1beta/files";
+    start.headers = {{"x-goog-api-key", api_key_},
+                     {"X-Goog-Upload-Protocol", "resumable"},
+                     {"X-Goog-Upload-Command", "start"},
+                     {"X-Goog-Upload-Header-Content-Length", std::to_string(input.bytes.size())},
+                     {"X-Goog-Upload-Header-Content-Type", input.mime_type},
+                     {"Content-Type", "application/json"}};
+    start.body = R"({"file":{"display_name":"summarizer-upload"}})";
+    const HttpResponse started = transport_(start);
+    const std::string upload_url = started.header("x-goog-upload-url");
+    if (started.status != 200 || upload_url.empty()) {
+        return fail(started, "start");
+    }
+
+    // 2. Send the bytes and finish.
+    HttpRequest send;
+    send.url = upload_url;
+    send.headers = {{"X-Goog-Upload-Offset", "0"}, {"X-Goog-Upload-Command", "upload, finalize"}};
+    send.body = input.bytes;
+    send.timeout_seconds = 600;
+    const HttpResponse sent = transport_(send);
+    const std::optional<JsonValue> info = JsonReader::parse(sent.body);
+    const JsonValue* file = info ? info->find("file") : nullptr;
+    if (sent.status != 200 || file == nullptr || file->string_or("uri").empty()) {
+        return fail(sent, "send");
+    }
+    Upload up{file->string_or("name"), file->string_or("uri")};
+
+    // 3. Wait until the server has processed it.
+    std::string state = file->string_or("state");
+    for (int i = 0; i < 90 && state == "PROCESSING"; ++i) {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        HttpRequest get;
+        get.method = "GET";
+        get.url = base + "/v1beta/" + up.name;
+        get.headers = {{"x-goog-api-key", api_key_}};
+        const HttpResponse got = transport_(get);
+        const std::optional<JsonValue> now = JsonReader::parse(got.body);
+        state = got.status == 200 && now ? now->string_or("state") : "FAILED";
+    }
+    if (state != "ACTIVE" && !state.empty()) {
+        delete_upload(up);
+        error.error = ApiError::BadResponse;
+        error.message = "upload: the server could not process the file (state " + state + ")";
+        return std::nullopt;
+    }
+    return up;
+}
+
+void GeminiClassifier::delete_upload(const Upload& upload) const {
+    if (upload.name.empty()) {
+        return;
+    }
+    HttpRequest del;
+    del.method = "DELETE";
+    del.url = "https://generativelanguage.googleapis.com/v1beta/" + upload.name;
+    del.headers = {{"x-goog-api-key", api_key_}};
+    transport_(del);  // best effort: the server deletes it after 48 hours anyway
 }
 
 // ---------------- Ollama ----------------

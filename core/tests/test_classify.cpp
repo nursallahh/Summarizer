@@ -70,6 +70,14 @@ const std::vector<smz::Course> kCourses = {{"Discrete Mathematics", "sets, relat
                                            {"Differential Equations", ""},
                                            {"Computer Organization", "MIPS, cache, pipeline"}};
 
+smz::HttpResponse reply(int status, std::string body, std::string error = {}) {
+    smz::HttpResponse r;
+    r.status = status;
+    r.body = std::move(body);
+    r.error = std::move(error);
+    return r;
+}
+
 // Gemini response whose text is `model_json`.
 std::string answer(const std::string& model_json) {
     std::string escaped;
@@ -123,9 +131,9 @@ void test_gemini_request() {
     smz::HttpRequest seen;
     const smz::GeminiClassifier fake("SECRET", "gemini-x", kCourses, [&](const smz::HttpRequest& r) {
         seen = r;
-        return smz::HttpResponse{200, batch_answer(R"j({"index":2,"course":"Discrete Mathematics","level":"medium",
+        return reply(200, batch_answer(R"j({"index":2,"course":"Discrete Mathematics","level":"medium",
             "kind":"slides","topic":"Graphs","evidence":"graph"},{"index":1,"course":"Computer Organization",
-            "level":"high","kind":"board","topic":"Cache","evidence":"MIPS"})j"), ""};
+            "level":"high","kind":"board","topic":"Cache","evidence":"MIPS"})j"), "");
     });
     const auto results = fake.classify_batch({photo, slides});
     check(results.size() == 2 && results[0].error == smz::ApiError::None &&
@@ -143,7 +151,7 @@ void test_gemini_request() {
     smz::ClassifyInput huge;
     huge.mime_type = "application/pdf";
     huge.bytes.assign(14u * 1024u * 1024u, 'x');
-    check(!c.cannot_read(huge).empty() && c.cannot_read(photo).empty(), "gemini: size limit per file");
+    check(c.cannot_read(huge).empty() && c.cannot_read(photo).empty(), "gemini: large files are readable (uploaded)");
 }
 
 void test_gemini_responses() {
@@ -188,9 +196,63 @@ void test_gemini_responses() {
     check(c.parse_response(503, "overloaded", 1)[0].error == smz::ApiError::Server, "gemini error: server busy");
 
     const smz::GeminiClassifier offline("K", "m", kCourses, [](const smz::HttpRequest&) {
-        return smz::HttpResponse{0, "", "no internet connection"};
+        return reply(0, "", "no internet connection");
     });
     check(offline.classify({}).error == smz::ApiError::Network, "gemini error: offline");
+}
+
+void test_gemini_upload() {
+    std::vector<smz::HttpRequest> calls;
+    const smz::GeminiClassifier c("KEY", "m", kCourses, [&](const smz::HttpRequest& r) {
+        calls.push_back(r);
+        if (r.url.find("/upload/v1beta/files") != std::string::npos) {
+            smz::HttpResponse ok = reply(200, "{}");
+            ok.headers = {{"x-goog-upload-url", "https://upload.example/session1"}};
+            return ok;
+        }
+        if (r.url == "https://upload.example/session1") {
+            return reply(200, R"j({"file":{"name":"files/abc","uri":"https://g/files/abc","state":"ACTIVE"}})j");
+        }
+        if (r.method == "DELETE") {
+            return reply(200, "{}");
+        }
+        return reply(200, batch_answer(R"j({"index":1,"course":"Discrete Mathematics","level":"high","kind":"exam_or_quiz",
+            "topic":"Vize","evidence":"proof questions"})j"));
+    });
+    smz::ClassifyInput big;
+    big.file_name = "Vize Not.pdf";
+    big.mime_type = "application/pdf";
+    big.bytes.assign(smz::GeminiClassifier::kUploadAbove + 1, 'p');
+    check(c.cannot_read(big).empty(), "upload: a 30 MB PDF is readable");
+    const auto r = c.classify(big);
+    check(r.error == smz::ApiError::None && r.suggestion.course == "Discrete Mathematics", "upload: classified");
+    check(calls.size() == 4, "upload: start, send, generate, delete");
+    if (calls.size() == 4) {
+        bool start_ok = false;
+        for (const auto& [k, v] : calls[0].headers) {
+            start_ok = start_ok || (k == "X-Goog-Upload-Header-Content-Length" && v == std::to_string(big.bytes.size()));
+        }
+        check(start_ok && calls[0].body.find("Vize") == std::string::npos,
+              "upload: size announced, file name not sent");
+        check(calls[1].body.size() == big.bytes.size(), "upload: bytes sent to the session URL");
+        check(calls[2].body.find("\"file_uri\":\"https://g/files/abc\"") != std::string::npos &&
+                  calls[2].body.find("inline_data") == std::string::npos && calls[2].body.size() < 100000,
+              "upload: request refers to the file instead of carrying it");
+        check(calls[3].method == "DELETE" && calls[3].url.find("/v1beta/files/abc") != std::string::npos,
+              "upload: file deleted after use");
+    }
+
+    const smz::GeminiClassifier refused("KEY", "m", kCourses, [](const smz::HttpRequest&) {
+        return reply(429, R"j({"error":{"code":429,"message":"Quota exceeded","details":[
+            {"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaId":"PerDay"}]}]}})j");
+    });
+    check(refused.classify(big).error == smz::ApiError::DailyQuota, "upload: quota errors are reported as such");
+
+    const smz::GeminiClassifier recite("K", "m", kCourses);
+    const auto rr = recite.parse_response(
+        200, R"j({"candidates":[{"content":{"parts":[]},"finishReason":"RECITATION"}]})j", 2);
+    check(rr[1].error == smz::ApiError::Blocked && rr[1].message.find("RECITATION") != std::string::npos,
+          "gemini response: recitation stop reported");
 }
 
 void test_ollama() {
@@ -217,7 +279,7 @@ void test_ollama() {
     smz::HttpRequest seen;
     const smz::OllamaClassifier fake("qwen3-vl:8b", kCourses, "http://127.0.0.1:11434", [&](const smz::HttpRequest& r) {
         seen = r;
-        return smz::HttpResponse{200, R"j({"model":"qwen3-vl:8b","message":{"role":"assistant","content":"{\"evidence\":\"ODE\",\"course\":\"Differential Equations\",\"level\":\"high\",\"kind\":\"board\",\"topic\":\"Laplace\"}"},"done":true,"prompt_eval_count":900,"eval_count":40})j", ""};
+        return reply(200, R"j({"model":"qwen3-vl:8b","message":{"role":"assistant","content":"{\"evidence\":\"ODE\",\"course\":\"Differential Equations\",\"level\":\"high\",\"kind\":\"board\",\"topic\":\"Laplace\"}"},"done":true,"prompt_eval_count":900,"eval_count":40})j", "");
     });
     const auto results = fake.classify_batch({photo, pdf});
     check(results.size() == 2 && results[0].error == smz::ApiError::None &&
@@ -230,7 +292,7 @@ void test_ollama() {
               smz::ApiError::ModelNotFound,
           "ollama error: model not pulled");
     const smz::OllamaClassifier down("m", kCourses, "http://127.0.0.1:11434", [](const smz::HttpRequest&) {
-        return smz::HttpResponse{0, "", "the service on this computer is not running"};
+        return reply(0, "", "the service on this computer is not running");
     });
     const auto r = down.classify(photo);
     check(r.error == smz::ApiError::Network && r.message.find("Ollama is not running") != std::string::npos,
@@ -283,6 +345,7 @@ int main() {
     test_office_text();
     test_gemini_request();
     test_gemini_responses();
+    test_gemini_upload();
     test_ollama();
     test_image_prep();
     return finish();

@@ -21,6 +21,40 @@
 
 namespace smz {
 
+namespace {
+
+// Parses "Name: value" lines into lower-case names.
+void parse_headers(const std::string& block, std::vector<std::pair<std::string, std::string>>& out) {
+    std::size_t start = 0;
+    while (start < block.size()) {
+        std::size_t end = block.find('\n', start);
+        if (end == std::string::npos) {
+            end = block.size();
+        }
+        std::string line = block.substr(start, end - start);
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const std::size_t colon = line.find(':');
+        if (colon != std::string::npos && colon > 0) {
+            std::string name = line.substr(0, colon);
+            for (char& c : name) {
+                if (c >= 'A' && c <= 'Z') {
+                    c = static_cast<char>(c - 'A' + 'a');
+                }
+            }
+            std::size_t v = colon + 1;
+            while (v < line.size() && line[v] == ' ') {
+                ++v;
+            }
+            out.emplace_back(std::move(name), line.substr(v));
+        }
+        start = end + 1;
+    }
+}
+
+}  // namespace
+
 #if defined(_WIN32)
 
 namespace {
@@ -91,7 +125,7 @@ HttpResponse http_post(const HttpRequest& request) {
         response.error = last_error("WinHttpConnect");
         return response;
     }
-    Handle req{WinHttpOpenRequest(connection.h, L"POST", path.c_str(), nullptr, WINHTTP_NO_REFERER,
+    Handle req{WinHttpOpenRequest(connection.h, widen(request.method).c_str(), path.c_str(), nullptr, WINHTTP_NO_REFERER,
                                   WINHTTP_DEFAULT_ACCEPT_TYPES, secure ? WINHTTP_FLAG_SECURE : 0)};
     if (req.h == nullptr) {
         response.error = last_error("WinHttpOpenRequest");
@@ -125,6 +159,24 @@ HttpResponse http_post(const HttpRequest& request) {
     WinHttpQueryHeaders(req.h, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
                         &status, &size, WINHTTP_NO_HEADER_INDEX);
     response.status = static_cast<int>(status);
+
+    DWORD header_bytes = 0;
+    WinHttpQueryHeaders(req.h, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_HEADER_NAME_BY_INDEX, WINHTTP_NO_OUTPUT_BUFFER,
+                        &header_bytes, WINHTTP_NO_HEADER_INDEX);
+    if (header_bytes > 0) {
+        std::wstring raw(header_bytes / sizeof(wchar_t), L'\0');
+        if (WinHttpQueryHeaders(req.h, WINHTTP_QUERY_RAW_HEADERS_CRLF, WINHTTP_HEADER_NAME_BY_INDEX, raw.data(),
+                                &header_bytes, WINHTTP_NO_HEADER_INDEX)) {
+            std::string narrow;
+            for (const wchar_t c : raw) {
+                if (c == L'\0') {
+                    break;
+                }
+                narrow += c < 0x80 ? static_cast<char>(c) : '?';  // header values used here are ASCII
+            }
+            parse_headers(narrow, response.headers);
+        }
+    }
 
     for (;;) {
         DWORD available = 0;
@@ -176,7 +228,7 @@ HttpResponse http_post(const HttpRequest& request) {
         response.error = "the service on this computer is not running";
         return response;
     }
-    std::string head = "POST " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: " +
+    std::string head = request.method + " " + path + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: " +
                        std::to_string(request.body.size()) + "\r\n";
     for (const auto& [name, value] : request.headers) {
         head += name + ": " + value + "\r\n";
@@ -204,6 +256,7 @@ HttpResponse http_post(const HttpRequest& request) {
         return response;
     }
     response.status = std::atoi(raw.c_str() + space + 1);
+    parse_headers(raw.substr(0, body_at), response.headers);
     response.body = raw.substr(body_at + 4);  // the test servers answer without chunked encoding
     return response;
 }
