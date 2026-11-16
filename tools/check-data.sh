@@ -70,7 +70,7 @@ for file in "$@"; do
         report "$file" "file is larger than 5 MB ($size bytes)"
     fi
 
-    # 7) API key patterns in content (Google: AIza..., OpenAI: sk-..., Anthropic: sk-ant-...)
+    # 7) API key patterns in content (Google "AIza..." keys and common "sk-..." style keys)
     #    This script contains the patterns itself, so it is skipped.
     if [ "$file" != "tools/check-data.sh" ]; then
         if grep -I -q -E 'AIza[0-9A-Za-z_-]{35}|(^|[^A-Za-z0-9])sk-(ant-)?[A-Za-z0-9_-]{20,}' "$file" 2>/dev/null; then
